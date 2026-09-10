@@ -1,0 +1,9 @@
+# Settings applied when the app runs (locally and when deployed).
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"

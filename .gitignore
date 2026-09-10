@@ -1,0 +1,10 @@
+.venv/
+.cache/
+userdata/
+__pycache__/
+*.pyc
+.DS_Store
+.streamlit/secrets.toml
+.claude/
+.vscode/
+*.log

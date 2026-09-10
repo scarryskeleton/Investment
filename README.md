@@ -14,7 +14,8 @@ Needs **Python 3.10+**.
 **First time only** — create the virtual environment and install dependencies:
 
 ```bash
-cd "/Users/collin/Desktop/Portfolio Alg"
+git clone https://github.com/scarryskeleton/Investment.git
+cd Investment
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -23,7 +24,7 @@ pip install -r requirements.txt
 **Every time** — activate the environment, then launch:
 
 ```bash
-cd "/Users/collin/Desktop/Portfolio Alg"
+cd Investment
 source .venv/bin/activate
 streamlit run app.py
 ```
@@ -232,7 +233,7 @@ run `streamlit run app.py` and expose it with `cloudflared tunnel` or `ngrok`.
 For a quick text-only analysis without the dashboard:
 
 ```bash
-cd "/Users/collin/Desktop/Portfolio Alg"
+cd Investment
 source .venv/bin/activate
 python cli.py --holdings sample_portfolio.csv --watchlist "COST,JNJ,XOM,BRK-B" --top 15
 ```
