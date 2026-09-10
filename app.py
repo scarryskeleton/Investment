@@ -64,6 +64,42 @@ def _latest_prices(tickers):
     return {} if px_.empty else px_.iloc[-1].to_dict()
 
 
+@st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
+def _origins(tickers):
+    """{ticker: {country, currency, name}} for the practice holdings."""
+    from pa import data
+
+    if not tickers:
+        return {}
+    f = data.fetch_fundamentals(list(tickers))
+    out = {}
+    for t in tickers:
+        row = f.loc[t].to_dict() if t in f.index else {}
+        out[t] = {
+            "country": (row.get("country") or "").strip(),
+            "currency": (row.get("currency") or "").strip().upper(),
+            "name": row.get("name") or t,
+        }
+    return out
+
+
+# country name -> flag emoji, for the names yfinance returns most often
+_FLAGS = {
+    "United States": "🇺🇸", "United Kingdom": "🇬🇧", "Netherlands": "🇳🇱",
+    "Germany": "🇩🇪", "France": "🇫🇷", "Switzerland": "🇨🇭", "Ireland": "🇮🇪",
+    "Canada": "🇨🇦", "Japan": "🇯🇵", "China": "🇨🇳", "Hong Kong": "🇭🇰",
+    "Taiwan": "🇹🇼", "South Korea": "🇰🇷", "India": "🇮🇳", "Australia": "🇦🇺",
+    "Spain": "🇪🇸", "Italy": "🇮🇹", "Sweden": "🇸🇪", "Denmark": "🇩🇰",
+    "Norway": "🇳🇴", "Finland": "🇫🇮", "Belgium": "🇧🇪", "Brazil": "🇧🇷",
+    "Mexico": "🇲🇽", "Israel": "🇮🇱", "Singapore": "🇸🇬", "Luxembourg": "🇱🇺",
+    "Austria": "🇦🇹", "Portugal": "🇵🇹", "New Zealand": "🇳🇿", "South Africa": "🇿🇦",
+}
+
+
+def _flag(country: str) -> str:
+    return _FLAGS.get((country or "").strip(), "🌐")
+
+
 @st.cache_data(show_spinner=False, ttl=60 * 60 * 6)
 def _explore_mix(stock_pct, stock_ticker, bond_ticker):
     return explore.analyze_mix(stock_pct, stock_ticker, bond_ticker)
@@ -192,6 +228,7 @@ _BOND_SLEEVES = {
     "TIP — inflation-linked bonds": "TIP",
 }
 EUR = "€{:,.0f}"
+EUR2 = "€{:,.2f}"
 
 
 def render_explore() -> None:
@@ -715,6 +752,95 @@ def render_research() -> None:
                "wrong; all return/risk figures are historical.")
 
 
+def _paper_fee_model() -> paper.FeeModel:
+    """Render the 'Trading costs' expander and return the chosen fee model."""
+    names = list(paper.PRESETS) + ["Custom…"]
+    default = "Typical EU broker (0.25% FX)"
+    with st.expander("⚙️ Trading costs", expanded=False):
+        choice = st.selectbox(
+            "Cost model", names, index=names.index(default), key="paper_fee_choice",
+            help="Applied to every buy and sell. Prices aren't currency-converted, "
+                 "so the FX fee stands in for the real cost of holding foreign names.",
+        )
+        if choice == "Custom…":
+            fc = st.columns(3)
+            m = paper.FeeModel(
+                flat=fc[0].number_input("Flat €/trade", 0.0, 100.0, 0.0, 0.5,
+                                        key="paper_fee_flat"),
+                rate_bps=fc[1].number_input("Commission (bps)", 0.0, 200.0, 0.0, 1.0,
+                                            key="paper_fee_bps",
+                                            help="1 bp = 0.01% of the trade value"),
+                fx_bps=fc[2].number_input("FX fee on foreign (bps)", 0.0, 200.0, 25.0,
+                                          1.0, key="paper_fee_fx"),
+            )
+        else:
+            m = paper.PRESETS[choice]
+        if m.active:
+            bits = []
+            if m.flat:
+                bits.append(f"€{m.flat:g} per trade")
+            if m.rate_bps:
+                bits.append(f"{m.rate_bps:g} bps commission")
+            if m.fx_bps:
+                bits.append(f"{m.fx_bps:g} bps FX fee on non-EUR names")
+            st.caption("Charging " + ", ".join(bits)
+                       + ". Fees are folded into cost basis on buys and taken off "
+                       "the proceeds on sells.")
+        else:
+            st.caption("No fees — trades execute at the quoted price.")
+    return m
+
+
+def _render_paper_overview(state: paper.PaperState) -> None:
+    """Portfolio overview for the practice account: where the money sits by
+    country and by currency, and how much of it is FX-exposed."""
+    invested = state.invested or 1.0
+    rows = [{"ticker": p.ticker, "value": p.market_value,
+             "country": p.country or "Unknown",
+             "currency": p.currency or "—"} for p in state.positions]
+    df = pd.DataFrame(rows)
+
+    by_country = (df.groupby("country")["value"].sum()
+                  .sort_values(ascending=True) / invested * 100)
+    by_ccy = (df.groupby("currency")["value"].sum()
+              .sort_values(ascending=False) / invested * 100)
+    foreign_pct = float(by_ccy[[c for c in by_ccy.index if c not in ("EUR", "—")]].sum())
+
+    st.subheader("Portfolio overview")
+    oc = st.columns([3, 2])
+
+    fig = px.bar(
+        x=by_country.values, y=by_country.index, orientation="h",
+        labels={"x": "% of holdings", "y": ""},
+        text=[f"{v:.0f}%" for v in by_country.values],
+    )
+    fig.update_traces(marker_color="#4c78a8", textposition="outside", cliponaxis=False)
+    fig.update_layout(height=max(160, 42 * len(by_country) + 60),
+                      margin=dict(t=10, b=10, l=10, r=30), xaxis_title="% of holdings")
+    oc[0].caption("By country of origin")
+    oc[0].plotly_chart(fig, use_container_width=True)
+
+    oc[1].caption("By currency")
+    cdf = pd.DataFrame({"Currency": by_ccy.index,
+                        "% of holdings": by_ccy.values.round(1)})
+    oc[1].dataframe(cdf, hide_index=True, use_container_width=True)
+    oc[1].metric("Foreign-currency exposure", f"{foreign_pct:.0f}%",
+                 help="Share of your invested value in securities not quoted in "
+                      "EUR. That slice carries currency risk and, here, an FX fee "
+                      "on every trade.")
+
+    n_countries = df["country"].nunique()
+    top = by_country.sort_values(ascending=False)
+    lead = top.index[0] if len(top) else "—"
+    st.caption(
+        f"Holdings span **{n_countries}** "
+        f"countr{'y' if n_countries == 1 else 'ies'}, most in **{lead}** "
+        f"({top.iloc[0]:.0f}%). Country and currency come from Yahoo Finance and "
+        "can be rough for funds — an ETF is tagged where it is *domiciled*, not "
+        "where it invests."
+    )
+
+
 def render_paper() -> None:
     """Mode: paper-trade fake money at real prices, track it vs the market."""
     sb = st.sidebar
@@ -756,12 +882,19 @@ def render_paper() -> None:
     latest = _latest_prices(tuple(held + ["SPY"])) if held else {}
     state = paper.compute_state(starting, trades, latest)
 
+    origins = _origins(tuple(held))
+    for p in state.positions:
+        o = origins.get(p.ticker, {})
+        p.country, p.currency = o.get("country", ""), o.get("currency", "")
+
     st.caption(f"Fake money, **real prices**. Profile **{profile}**, started with "
-               f"{EUR.format(starting)}. Prices are the latest close (delayed) and "
-               "there are no fees, spreads or taxes — a place to learn, not a broker.")
+               f"{EUR.format(starting)}. Prices are the latest close (delayed), each "
+               "in its own native currency. A place to learn, not a broker.")
     if state.missing_prices:
         st.warning("No current price for: " + ", ".join(state.missing_prices)
                    + " — valued at cost for now.")
+
+    fees = _paper_fee_model()
 
     # ---- headline ----
     ec = pd.DataFrame()
@@ -801,6 +934,9 @@ def render_paper() -> None:
     if tk and not price_now:
         st.warning(f"No price found for **{tk}** — check the ticker.")
     elif tk:
+        origin = _origins((tk,)).get(tk, {})
+        cur = origin.get("currency", "")
+        foreign = bool(cur) and cur != "EUR"
         qc = st.columns([1, 3])
         if by == "shares":
             qty = qc[0].number_input("Shares", 0.0, 1e7, 1.0, 1.0, key="paper_qty")
@@ -809,22 +945,32 @@ def render_paper() -> None:
             amt = qc[0].number_input("Euros", 0.0, 1e9, 500.0, 50.0, key="paper_amt")
             shares = float(amt) / price_now
         value = shares * price_now
+        fee = fees.fee(value, foreign)
+        cash_out = value + fee if side == "Buy" else value - fee
+        _origin_bit = (f" · {_flag(origin.get('country',''))} {origin.get('country','')}"
+                       f" ({cur})" if cur else "")
+        _fee_bit = (f" · fee **{EUR2.format(fee)}**"
+                    + (" *(incl. FX)*" if foreign and fees.fx_bps else "")) if fee else ""
         qc[1].markdown(
-            f"&nbsp;\n\n**{tk}** at **{EUR.format(price_now)}** → "
-            f"{side.lower()} **{shares:,.4f}** shares = **{EUR.format(value)}**"
+            f"&nbsp;\n\n**{tk}** at **{EUR.format(price_now)}**{_origin_bit} → "
+            f"{side.lower()} **{shares:,.4f}** shares = **{EUR.format(value)}**{_fee_bit}"
+            + (f" → **{EUR2.format(cash_out)}** {'out' if side == 'Buy' else 'in'}"
+               if fee else "")
         )
         pos = next((p for p in state.positions if p.ticker == tk), None)
         if st.button(f"{side} {tk}", type="primary"):
             if shares <= 0:
                 st.error("Enter a positive amount.")
-            elif side == "Buy" and value > state.cash + 1e-6:
-                st.error(f"Not enough cash — you have {EUR.format(state.cash)}.")
+            elif side == "Buy" and value + fee > state.cash + 1e-6:
+                st.error(f"Not enough cash — {EUR2.format(value)} + {EUR2.format(fee)} "
+                         f"fee, you have {EUR2.format(state.cash)}.")
             elif side == "Sell" and (pos is None or shares > pos.shares + 1e-6):
                 st.error(f"You only hold {pos.shares:,.4f} {tk}." if pos
                          else f"You don't hold any {tk}.")
             else:
-                store.practice_record_trade(aid, side.lower(), tk, shares, price_now)
-                st.toast(f"{side} {shares:,.4f} {tk} @ {EUR.format(price_now)}", icon="🎮")
+                store.practice_record_trade(aid, side.lower(), tk, shares, price_now, fee)
+                st.toast(f"{side} {shares:,.4f} {tk} @ {EUR.format(price_now)}"
+                         + (f"  (fee {EUR2.format(fee)})" if fee else ""), icon="🎮")
                 st.rerun()
 
     # ---- holdings ----
@@ -832,6 +978,8 @@ def render_paper() -> None:
         st.subheader("Your holdings")
         hdf = pd.DataFrame([{
             "Ticker": p.ticker,
+            "Origin": f"{_flag(p.country)} {p.country or '—'}",
+            "Ccy": p.currency or "—",
             "Shares": round(p.shares, 4),
             "Avg cost": round(p.avg_cost, 2),
             "Price now": round(p.last_price, 2),
@@ -841,10 +989,14 @@ def render_paper() -> None:
             "Weight %": round(p.weight * 100, 1),
         } for p in state.positions])
         st.dataframe(hdf, hide_index=True, use_container_width=True)
-        d = st.columns(3)
+        d = st.columns(4)
         d[0].metric("Unrealized P&L", EUR.format(sum(p.unrealized for p in state.positions)))
         d[1].metric("Realized P&L", EUR.format(state.realized_pnl))
-        d[2].metric("Trades made", state.n_trades)
+        d[2].metric("Fees paid", EUR2.format(state.fees_paid),
+                    help="Total commission + FX fees across every trade so far.")
+        d[3].metric("Trades made", state.n_trades)
+
+        _render_paper_overview(state)
     elif trades.empty:
         st.info("No trades yet. Pick a ticker above and buy something to get started — "
                 "try a broad ETF like **VTI** or **BND**, or a company you know.")
@@ -875,6 +1027,8 @@ def render_paper() -> None:
             log = trades.copy()
             log["ts"] = log["ts"].dt.strftime("%Y-%m-%d %H:%M")
             log["value"] = (log["shares"] * log["price"]).round(0)
+            if "fee" in log.columns:
+                log["fee"] = log["fee"].round(2)
             st.dataframe(log.iloc[::-1], hide_index=True, use_container_width=True)
             if st.button("Undo last trade"):
                 store.practice_undo_last(aid)
@@ -888,9 +1042,10 @@ def render_paper() -> None:
             st.rerun()
 
     st.divider()
-    st.caption("Paper trading — no real money. Prices are delayed closes; fees, "
-               "spreads, dividends and taxes are not modelled, so real results "
-               "would differ. This is a learning sandbox.")
+    st.caption("Paper trading — no real money. Prices are delayed closes in each "
+               "security's native currency (not FX-converted). Commission and an FX "
+               "fee are modelled; spreads, slippage, dividends and taxes are not, so "
+               "real results would still differ. This is a learning sandbox.")
 
 
 # --------------------------------------------------------------------------- #

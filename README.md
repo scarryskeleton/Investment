@@ -46,16 +46,25 @@ latest close**. Everything is derived from the trade log:
 
 - **Headline** — total value, cash, amount in the market, total P&L (€ and %),
   and what the same starting cash would be worth if you'd just bought the S&P 500
-- **Trade ticket** — ticker, buy/sell, size in shares or euros; validates that
-  you have the cash / the shares
+- **Trade ticket** — ticker, buy/sell, size in shares or euros; shows the
+  security's country and currency, and the fee on the trade; validates that you
+  have the cash (incl. fee) / the shares
+- **Trading costs** — a switchable cost model (none, a few broker presets, or
+  custom): a flat charge and/or commission per trade, plus an FX conversion fee
+  on securities not quoted in EUR. Buy fees go into cost basis; sell fees come
+  off the proceeds; both show in the equity curve
 - **Holdings** — shares, average cost, current price, value, unrealized P&L,
-  weight
+  weight, plus country of origin and currency
+- **Portfolio overview** — where your money sits by country and by currency,
+  and the share of it exposed to foreign-currency (FX) risk
 - **Equity curve** — your account value day-by-day (a real reconstruction from
   your trades against historical prices) next to "all-in S&P 500"
-- **Trade log**, undo-last, and a reset button
+- **Trade log** (with fees), undo-last, and a reset button
 
 Saved per profile, so you can trade over weeks and watch how your picks do.
-No fees, spreads, dividends or taxes — a learning sandbox, not a broker.
+Prices are each security's **native quote** — not converted to euros — so the
+FX fee stands in for the real cost of holding foreign names. Spreads, slippage,
+dividends and taxes are still not modelled — a learning sandbox, not a broker.
 
 ### 🔎 Research a stock or bond (search or browse, focus one)
 

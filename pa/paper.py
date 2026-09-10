@@ -4,7 +4,10 @@ Holdings, cash and P&L are *derived* by replaying the trade log, so the only
 thing stored is the list of trades. The equity curve is a real day-by-day
 reconstruction of the account against actual historical prices.
 
-Fake money, real prices. No fees, spreads, slippage or taxes are modelled.
+Fake money, real prices. Broker commission and an FX conversion fee are
+modelled per trade (see ``FeeModel``); spreads, slippage, dividends and taxes
+are not. Prices are the security's native quote — not converted to one
+currency — so the FX fee stands in for the cost of holding foreign names.
 """
 
 from __future__ import annotations
@@ -13,6 +16,36 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
+
+
+@dataclass
+class FeeModel:
+    """A simple broker cost model, applied to every buy and sell.
+
+    ``flat`` euros per trade, plus ``rate_bps`` basis points of the trade
+    value, plus an extra ``fx_bps`` basis points when the security is not
+    quoted in the account currency (EUR).
+    """
+
+    flat: float = 0.0
+    rate_bps: float = 0.0
+    fx_bps: float = 0.0
+
+    def fee(self, notional: float, foreign: bool) -> float:
+        bps = self.rate_bps + (self.fx_bps if foreign else 0.0)
+        return self.flat + abs(notional) * bps / 1e4
+
+    @property
+    def active(self) -> bool:
+        return self.flat > 0 or self.rate_bps > 0 or self.fx_bps > 0
+
+
+PRESETS: dict[str, FeeModel] = {
+    "No fees": FeeModel(),
+    "Typical EU broker (0.25% FX)": FeeModel(flat=0.0, rate_bps=0.0, fx_bps=25.0),
+    "Flat €2 + 0.25% FX": FeeModel(flat=2.0, rate_bps=0.0, fx_bps=25.0),
+    "0.1% commission + 0.35% FX": FeeModel(flat=0.0, rate_bps=10.0, fx_bps=35.0),
+}
 
 
 @dataclass
@@ -26,6 +59,8 @@ class Position:
     unrealized: float
     unrealized_pct: float
     weight: float
+    country: str = ""
+    currency: str = ""
 
 
 @dataclass
@@ -40,28 +75,37 @@ class PaperState:
     positions: list[Position] = field(default_factory=list)
     n_trades: int = 0
     missing_prices: list[str] = field(default_factory=list)
+    fees_paid: float = 0.0
 
 
 def _replay(trades: pd.DataFrame):
-    """Return (holdings {ticker: {shares, cost}}, cash_delta, realized)."""
+    """Return (holdings {ticker: {shares, cost}}, cash_delta, realized, fees).
+
+    A buy's fee is folded into its cost basis; a sell's fee comes straight off
+    the proceeds and the realized gain. Either way it leaves the account, so it
+    always reduces ``cash_delta``.
+    """
     holdings: dict[str, dict] = {}
     cash_delta = 0.0
     realized = 0.0
+    fees = 0.0
     for _, t in trades.iterrows():
         tk, sh, pr = t["ticker"], float(t["shares"]), float(t["price"])
+        fee = float(t["fee"]) if "fee" in t and pd.notna(t["fee"]) else 0.0
+        fees += fee
         h = holdings.setdefault(tk, {"shares": 0.0, "cost": 0.0})
         if t["side"] == "buy":
             h["shares"] += sh
-            h["cost"] += sh * pr
-            cash_delta -= sh * pr
+            h["cost"] += sh * pr + fee
+            cash_delta -= sh * pr + fee
         else:  # sell
             sell = min(sh, h["shares"])
             avg = h["cost"] / h["shares"] if h["shares"] > 1e-9 else pr
-            realized += sell * (pr - avg)
+            realized += sell * (pr - avg) - fee
             h["shares"] -= sell
             h["cost"] -= sell * avg
-            cash_delta += sell * pr
-    return holdings, cash_delta, realized
+            cash_delta += sell * pr - fee
+    return holdings, cash_delta, realized, fees
 
 
 def compute_state(
@@ -71,7 +115,7 @@ def compute_state(
         return PaperState(starting_cash, starting_cash, 0.0, starting_cash,
                           0.0, 0.0, 0.0, [], 0)
 
-    holdings, cash_delta, realized = _replay(trades)
+    holdings, cash_delta, realized, fees = _replay(trades)
     cash = starting_cash + cash_delta
 
     positions, invested, missing = [], 0.0, []
@@ -109,6 +153,7 @@ def compute_state(
         positions=positions,
         n_trades=len(trades),
         missing_prices=missing,
+        fees_paid=fees,
     )
 
 
@@ -146,7 +191,7 @@ def equity_curve(
     rows = []
     for day in hist.index:
         upto = tr[tr["day"] <= day]
-        holdings, cash_delta, _ = _replay(upto)
+        holdings, cash_delta, _, _ = _replay(upto)
         cash = starting_cash + cash_delta
         mv = 0.0
         for tk, h in holdings.items():

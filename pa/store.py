@@ -52,9 +52,17 @@ CREATE TABLE IF NOT EXISTS practice_trades (
     side       TEXT NOT NULL,
     ticker     TEXT NOT NULL,
     shares     REAL NOT NULL,
-    price      REAL NOT NULL
+    price      REAL NOT NULL,
+    fee        REAL NOT NULL DEFAULT 0
 );
 """
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Additive column adds for databases created by an older version."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(practice_trades)")}
+    if "fee" not in cols:
+        conn.execute("ALTER TABLE practice_trades ADD COLUMN fee REAL NOT NULL DEFAULT 0")
 
 
 def _now() -> str:
@@ -72,6 +80,7 @@ def _connect() -> sqlite3.Connection:
 def init() -> None:
     with _connect() as conn:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
 
 
 # --------------------------------------------------------------------------- #
@@ -275,7 +284,8 @@ def practice_get_or_create(
 
 
 def practice_record_trade(
-    account_id: int, side: str, ticker: str, shares: float, price: float
+    account_id: int, side: str, ticker: str, shares: float, price: float,
+    fee: float = 0.0,
 ) -> None:
     if side not in ("buy", "sell"):
         raise ValueError("side must be 'buy' or 'sell'")
@@ -283,20 +293,22 @@ def practice_record_trade(
         raise ValueError("shares and price must be positive")
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO practice_trades (account_id, ts, side, ticker, shares, price) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (account_id, _now(), side, ticker.strip().upper(), float(shares), float(price)),
+            "INSERT INTO practice_trades (account_id, ts, side, ticker, shares, price, fee) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (account_id, _now(), side, ticker.strip().upper(), float(shares),
+             float(price), max(0.0, float(fee))),
         )
 
 
 def practice_trades(account_id: int) -> pd.DataFrame:
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT ts, side, ticker, shares, price FROM practice_trades "
+            "SELECT ts, side, ticker, shares, price, fee FROM practice_trades "
             "WHERE account_id = ? ORDER BY ts, id",
             (account_id,),
         ).fetchall()
-    df = pd.DataFrame([dict(r) for r in rows], columns=["ts", "side", "ticker", "shares", "price"])
+    df = pd.DataFrame([dict(r) for r in rows],
+                      columns=["ts", "side", "ticker", "shares", "price", "fee"])
     if not df.empty:
         # stored as UTC ISO; drop the tz so it compares cleanly with naive price indexes
         df["ts"] = pd.to_datetime(df["ts"], utc=True).dt.tz_localize(None)
