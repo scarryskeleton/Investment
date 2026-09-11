@@ -8,6 +8,8 @@ from Streamlit's script threads.
 
 from __future__ import annotations
 
+import hashlib
+import secrets as _secrets
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,9 +20,11 @@ DB_PATH = Path(__file__).resolve().parent.parent / "userdata" / "portfolios.db"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS profiles (
-    id         INTEGER PRIMARY KEY,
-    name       TEXT UNIQUE NOT NULL,
-    created_at TEXT NOT NULL
+    id            INTEGER PRIMARY KEY,
+    name          TEXT UNIQUE NOT NULL,
+    created_at    TEXT NOT NULL,
+    password_hash TEXT,
+    password_salt TEXT
 );
 CREATE TABLE IF NOT EXISTS portfolios (
     id          INTEGER PRIMARY KEY,
@@ -76,6 +80,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE practice_accounts ADD COLUMN currency TEXT NOT NULL DEFAULT 'EUR'"
         )
+    pcols = {r["name"] for r in conn.execute("PRAGMA table_info(profiles)")}
+    if "password_hash" not in pcols:
+        conn.execute("ALTER TABLE profiles ADD COLUMN password_hash TEXT")
+    if "password_salt" not in pcols:
+        conn.execute("ALTER TABLE profiles ADD COLUMN password_salt TEXT")
 
 
 def _now() -> str:
@@ -122,7 +131,12 @@ def list_profiles() -> list[str]:
         return [r["name"] for r in conn.execute("SELECT name FROM profiles ORDER BY name")]
 
 
-def get_or_create_profile(name: str) -> int:
+def get_or_create_profile(name: str, password: str = "") -> int:
+    """Look up a profile by name, creating it if new.
+
+    ``password``, if given, is only set at *creation* time — it has no effect
+    on an existing profile (use :func:`profile_set_password` for that).
+    """
     name = name.strip()
     if not name:
         raise ValueError("Profile name cannot be empty.")
@@ -130,10 +144,50 @@ def get_or_create_profile(name: str) -> int:
         row = conn.execute("SELECT id FROM profiles WHERE name = ?", (name,)).fetchone()
         if row:
             return row["id"]
+        h, salt = (_hash_password(password) if password else (None, None))
         cur = conn.execute(
-            "INSERT INTO profiles (name, created_at) VALUES (?, ?)", (name, _now())
+            "INSERT INTO profiles (name, created_at, password_hash, password_salt) "
+            "VALUES (?, ?, ?, ?)",
+            (name, _now(), h, salt),
         )
         return cur.lastrowid
+
+
+def _hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
+    salt = salt or _secrets.token_hex(8)
+    h = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    return h, salt
+
+
+def profile_has_password(name: str) -> bool:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT password_hash FROM profiles WHERE name = ?", (name.strip(),)
+        ).fetchone()
+    return bool(row and row["password_hash"])
+
+
+def profile_check_password(name: str, password: str) -> bool:
+    """True if ``password`` matches, or the profile has no password set."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT password_hash, password_salt FROM profiles WHERE name = ?",
+            (name.strip(),),
+        ).fetchone()
+    if not row or not row["password_hash"]:
+        return True
+    h, _ = _hash_password(password, row["password_salt"])
+    return h == row["password_hash"]
+
+
+def profile_set_password(name: str, password: str) -> None:
+    """Set (or, with an empty string, remove) a profile's password."""
+    h, salt = (_hash_password(password) if password else (None, None))
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE profiles SET password_hash = ?, password_salt = ? WHERE name = ?",
+            (h, salt, name.strip()),
+        )
 
 
 def _profile_id(conn: sqlite3.Connection, name: str) -> int | None:

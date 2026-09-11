@@ -948,6 +948,57 @@ def _render_paper_overview(state: paper.PaperState, account: str) -> None:
     )
 
 
+def _paper_access(profile: str) -> bool:
+    """Sidebar password gate for one practice profile's write actions.
+
+    Viewing a profile never needs a password — everyone can see everyone's
+    practice account. This only decides whether trade/undo/reset are allowed
+    to run this rerun, returning True when they are.
+    """
+    sb = st.sidebar
+    key = f"unlocked::{profile}"
+    has_pw = store.profile_has_password(profile)
+
+    if has_pw and not st.session_state.get(key):
+        with sb.form(f"unlock_form_{profile}", clear_on_submit=True):
+            st.caption(f"🔒 **{profile}** is password-protected. Anyone can "
+                       "view it — you need the password to trade, undo or reset.")
+            pw = st.text_input("Password", type="password", label_visibility="collapsed",
+                               placeholder="Password to make changes")
+            if st.form_submit_button("Unlock", use_container_width=True):
+                if store.profile_check_password(profile, pw):
+                    st.session_state[key] = True
+                    st.rerun()
+                else:
+                    st.error("Wrong password.")
+        return bool(st.session_state.get(key))
+
+    if has_pw:
+        sb.caption(f"🔓 Unlocked for **{profile}** this session.")
+        if sb.button("Lock again", use_container_width=True):
+            st.session_state[key] = False
+            st.rerun()
+        return True
+
+    with sb.expander("🔓 Add a password"):
+        st.caption("Anyone can already view this profile. A password stops "
+                   "*others* from trading, undoing or resetting it — they can "
+                   "still watch.")
+        p1 = st.text_input("New password", type="password", key=f"newpw1_{profile}")
+        p2 = st.text_input("Confirm", type="password", key=f"newpw2_{profile}")
+        if st.button("Set password", key=f"setpw_{profile}"):
+            if not p1:
+                st.error("Type a password first.")
+            elif p1 != p2:
+                st.error("Passwords don't match.")
+            else:
+                store.profile_set_password(profile, p1)
+                st.session_state[key] = True
+                st.toast("Password set — this profile is now protected.", icon="🔒")
+                st.rerun()
+    return True
+
+
 def render_paper() -> None:
     """Mode: paper-trade fake money at real prices, track it vs the market."""
     sb = st.sidebar
@@ -958,6 +1009,8 @@ def render_paper() -> None:
     _cur = st.session_state.profile if st.session_state.profile in _profs else None
     _idx = _profs.index(_cur) if _cur else (0 if _profs else len(_opts) - 1)
     _ch = sb.selectbox("Profile", _opts, index=_idx,
+                       help="Everyone can see every profile's practice account. "
+                            "Only its own password can change one.",
                        key=f"paper_prof_{st.session_state.profile_nonce}")
 
     st.title("🎮 Practice portfolio")
@@ -965,9 +1018,13 @@ def render_paper() -> None:
     if _ch == NEW_PROFILE:
         _n = sb.text_input("New profile name", key="paper_new_prof",
                            placeholder="anything — e.g. your name")
+        _p = sb.text_input("Password (optional, protects it from others)",
+                           type="password", key="paper_new_prof_pw")
         if sb.button("Create", use_container_width=True):
             if _n.strip():
-                store.get_or_create_profile(_n.strip())
+                store.get_or_create_profile(_n.strip(), password=_p)
+                if _p:
+                    st.session_state[f"unlocked::{_n.strip()}"] = True
                 st.session_state.profile = _n.strip()
                 st.session_state.profile_nonce += 1
                 st.rerun()
@@ -975,11 +1032,13 @@ def render_paper() -> None:
                 sb.error("Type a name first.")
         st.info("Pick or create a **profile** in the sidebar — your practice "
                 "portfolio is saved under it, so you can trade over days and weeks "
-                "and watch how your picks do.")
+                "and watch how your picks do. A password is optional but keeps "
+                "others from changing it; anyone can still view it.")
         return
 
     profile = _ch
     st.session_state.profile = _ch
+    can_edit = _paper_access(profile)
     acc = store.practice_get_or_create(profile, currency=ACCOUNT_CCY)
     aid = acc["id"]
     acct_ccy = ACCOUNT_CCY
@@ -1094,8 +1153,10 @@ def render_paper() -> None:
                if fee else "")
         )
         pos = next((p for p in state.positions if p.ticker == tk), None)
-        if st.button(f"{side} {tk}", type="primary"):
-            if shares <= 0:
+        if st.button(f"{side} {tk}", type="primary", disabled=not can_edit):
+            if not can_edit:
+                st.error("🔒 This profile is locked — enter its password in the sidebar.")
+            elif shares <= 0:
                 st.error("Enter a positive amount.")
             elif side == "Buy" and value + fee > state.cash + 1e-6:
                 st.error(f"Not enough cash — {EUR2.m(value)} + {EUR2.m(fee)} "
@@ -1176,18 +1237,25 @@ def render_paper() -> None:
             st.dataframe(log.iloc[::-1], hide_index=True, use_container_width=True)
             st.caption("Prices shown converted to " + acct_ccy
                        + " at each trade date's exchange rate.")
-            if st.button("Undo last trade"):
-                store.practice_undo_last(aid)
-                st.rerun()
+            if st.button("Undo last trade", disabled=not can_edit):
+                if can_edit:
+                    store.practice_undo_last(aid)
+                    st.rerun()
+            if not can_edit:
+                st.caption("🔒 Locked — enter the password in the sidebar to undo.")
 
     with st.expander("Start over"):
         newcash = st.number_input(f"Fresh starting cash ({acct_ccy})", 100.0, 1e8,
                                   float(round(starting)), 500.0)
-        if st.button("Reset this practice portfolio", type="secondary"):
-            store.practice_reset(aid, newcash)
-            store.practice_set_currency(aid, acct_ccy)
-            st.toast("Practice portfolio reset.", icon="♻️")
-            st.rerun()
+        if st.button("Reset this practice portfolio", type="secondary",
+                     disabled=not can_edit):
+            if can_edit:
+                store.practice_reset(aid, newcash)
+                store.practice_set_currency(aid, acct_ccy)
+                st.toast("Practice portfolio reset.", icon="♻️")
+                st.rerun()
+        if not can_edit:
+            st.caption("🔒 Locked — enter the password in the sidebar to reset.")
 
     st.divider()
     st.caption(f"Paper trading — no real money. Prices are delayed closes, converted "

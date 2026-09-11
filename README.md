@@ -207,8 +207,8 @@ exports the whole thing as a filled-in Markdown template you can download.
 
 ## Profiles & saved portfolios
 
-The dashboard has a lightweight **account layer** (no passwords — the data lives
-only on this machine, in `userdata/portfolios.db`, which is git-ignored):
+The dashboard has a lightweight **account layer** — the data lives only on
+this machine, in `userdata/portfolios.db`, which is git-ignored:
 
 - **Profile** — pick or create a named profile in the sidebar. Each profile is
   its own namespace of saved portfolios.
@@ -220,6 +220,14 @@ only on this machine, in `userdata/portfolios.db`, which is git-ignored):
 
 Delete a profile from the `⋯` button next to its name (removes all its
 portfolios). To wipe everything, delete `userdata/portfolios.db`.
+
+**Practice-portfolio passwords.** Anyone can view any profile's practice
+account (pick it from the **Profile** dropdown in 🎮 Practice mode) — there's
+no login. A profile can optionally set a password (when it's created, or later
+from the sidebar's **🔓 Add a password**), which is then required to place a
+trade, undo, or reset *that* profile — but never to view it. Passwords are
+stored as a salted SHA-256 hash, not plaintext, and unlocking lasts for the
+browser session. A profile with no password stays fully open, as before.
 
 ## Using the dashboard
 
@@ -249,7 +257,9 @@ Caveats to tell them:
   wiped whenever the app redeploys or wakes from sleep. Fine for "try it out",
   not for tracking a practice portfolio over months. For durable storage, move
   `pa/store.py` onto a hosted database (e.g. a free Supabase Postgres).
-- **No passwords.** Anyone with the link can open any profile by name.
+- **Viewing is always open.** Anyone with the link can open any profile by
+  name. An optional per-profile password only gates *changes* (trade, undo,
+  reset) in 🎮 Practice mode — see [Profiles & saved portfolios](#profiles--saved-portfolios).
 - The app **sleeps after inactivity**; the first visit then takes ~30s to wake.
 - Yahoo Finance occasionally rate-limits shared cloud IPs — a reload usually fixes it.
 
