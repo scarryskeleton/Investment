@@ -35,36 +35,54 @@ the terminal to stop it.
 If you get `command not found: streamlit`, the environment isn't active — re-run
 `source .venv/bin/activate` (your shell prompt should start with `(.venv)`).
 
+## Currency
+
+The sidebar has a **Currency** picker (26 options, EUR by default) that applies
+across every mode. Prices come back from Yahoo Finance in each security's own
+listing currency (a US stock in USD, a Paris listing in EUR, a London one in
+pence); the app converts them into your chosen currency using **historical**
+EUR-cross exchange rates (via Yahoo's `BASEQUOTE=X` pairs), so a currency's
+moves are part of your returns, not hidden — the same way they'd hit a real
+account. Explore's two-fund mix, Analyze's portfolio value and weights, and
+the whole Practice portfolio all convert this way; Research shows a security's
+own figures (market cap, EPS, etc.) in *that security's* currency, since that's
+the currency they're actually reported in.
+
 ## Four modes
 
 The sidebar has a **Mode** switch:
 
 ### 🎮 Practice portfolio (paper trading)
 
-Start with fake cash (default €10,000) and **buy / sell any real ticker at its
+Start with fake cash (default 10,000) and **buy / sell any real ticker at its
 latest close**. Everything is derived from the trade log:
 
-- **Headline** — total value, cash, amount in the market, total P&L (€ and %),
-  and what the same starting cash would be worth if you'd just bought the S&P 500
-- **Trade ticket** — ticker, buy/sell, size in shares or euros; shows the
-  security's country and currency, and the fee on the trade; validates that you
-  have the cash (incl. fee) / the shares
+- **Headline** — total value, cash, amount in the market, total P&L (amount
+  and %), and what the same starting cash would be worth if you'd just bought
+  the S&P 500
+- **Trade ticket** — ticker, buy/sell, size in shares or your currency; shows
+  the security's country, its native price and currency, and the fee on the
+  trade; validates that you have the cash (incl. fee) / the shares
 - **Trading costs** — a switchable cost model (none, a few broker presets, or
   custom): a flat charge and/or commission per trade, plus an FX conversion fee
-  on securities not quoted in EUR. Buy fees go into cost basis; sell fees come
-  off the proceeds; both show in the equity curve
+  on securities not quoted in your account currency. Buy fees go into cost
+  basis; sell fees come off the proceeds; both show in the equity curve
 - **Holdings** — shares, average cost, current price, value, unrealized P&L,
-  weight, plus country of origin and currency
-- **Portfolio overview** — where your money sits by country and by currency,
-  and the share of it exposed to foreign-currency (FX) risk
+  weight, plus business market (sector), country of origin and currency
+- **Portfolio overview** — where your money sits by business market (with the
+  tickers in each), by country, and by currency, plus the share of it exposed
+  to foreign-currency (FX) risk
 - **Equity curve** — your account value day-by-day (a real reconstruction from
-  your trades against historical prices) next to "all-in S&P 500"
-- **Trade log** (with fees), undo-last, and a reset button
+  your trades against historical prices, each leg FX-converted at that day's
+  rate) next to "all-in S&P 500"
+- **Trade log** (with fees, in your currency), undo-last, and a reset button
 
 Saved per profile, so you can trade over weeks and watch how your picks do.
-Prices are each security's **native quote** — not converted to euros — so the
-FX fee stands in for the real cost of holding foreign names. Spreads, slippage,
-dividends and taxes are still not modelled — a learning sandbox, not a broker.
+Every price is converted from the security's native quote to your account
+currency at historical exchange rates — the FX fee is on top of that, standing
+in for the real cost of a broker converting currency for you. Spreads,
+slippage, dividends and taxes are still not modelled — a learning sandbox, not
+a broker.
 
 ### 🔎 Research a stock or bond (search or browse, focus one)
 
@@ -102,8 +120,10 @@ to focus that name, and the full write-up appears below:
 - **Risk slider** — one control for % stocks vs % bonds; historical return,
   volatility, worst drop and worst 12-month stretch update live, with a
   plain-language read-out and a risk/return trade-off chart
-- **Growth of €10,000** for your mix vs 100% stocks / 100% bonds / cash
-- **Monthly savings simulator** — "€X/month for Y years" as a bad / typical /
+- **Growth of 10,000** (in your account currency) for your mix vs 100% stocks /
+  100% bonds / cash — the two funds are converted to that currency at
+  historical rates first, so FX moves show up in the numbers
+- **Monthly savings simulator** — "X/month for Y years" as a bad / typical /
   good outcome band, 1,000 paths. Two engines you can toggle: *resample real
   history* (block bootstrap, the trustworthy default) or an **experimental
   neural generator** — a tiny NumPy mixture-density network ([pa/neural.py](pa/neural.py))
@@ -264,6 +284,7 @@ python cli.py --holdings sample_portfolio.csv --watchlist "COST,JNJ,XOM,BRK-B" -
 | `pa/education.py` | Glossary, method notes, plain-language result interpretation |
 | `pa/store.py` | SQLite persistence for profiles + saved portfolios |
 | `pa/data.py` | yfinance price + fundamentals access, disk-cached |
+| `pa/fx.py` | Currency conversion — spot and historical FX rates via Yahoo, reused for the account-currency setting everywhere |
 | `pa/universe.py` | Curated ETF list and S&P 500 constituents |
 | `pa/portfolio.py` | Parse holdings input → normalized weights |
 | `pa/metrics.py` | Return/risk/exposure metrics |

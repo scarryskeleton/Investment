@@ -42,9 +42,9 @@ class FeeModel:
 
 PRESETS: dict[str, FeeModel] = {
     "No fees": FeeModel(),
-    "Typical EU broker (0.25% FX)": FeeModel(flat=0.0, rate_bps=0.0, fx_bps=25.0),
-    "Flat €2 + 0.25% FX": FeeModel(flat=2.0, rate_bps=0.0, fx_bps=25.0),
-    "0.1% commission + 0.35% FX": FeeModel(flat=0.0, rate_bps=10.0, fx_bps=35.0),
+    "Low-cost broker (0.25% FX only)": FeeModel(fx_bps=25.0),
+    "Flat 2 / trade + 0.25% FX": FeeModel(flat=2.0, fx_bps=25.0),
+    "0.1% commission + 0.35% FX": FeeModel(rate_bps=10.0, fx_bps=35.0),
 }
 
 
@@ -61,6 +61,8 @@ class Position:
     weight: float
     country: str = ""
     currency: str = ""
+    sector: str = ""
+    name: str = ""
 
 
 @dataclass

@@ -59,6 +59,7 @@ def analyze_mix(
     lookback_years: float = 18.0,
     cash_rate: float = 0.03,
     start_value: float = 10_000.0,
+    account_ccy: str = "",
 ) -> MixResult:
     px = data.fetch_prices([stock_ticker, bond_ticker], lookback_years)
     missing = [t for t in (stock_ticker, bond_ticker) if t not in px.columns]
@@ -67,6 +68,16 @@ def analyze_mix(
     px = px[[stock_ticker, bond_ticker]].dropna()
     if len(px) < 250:
         raise ValueError("Not enough overlapping history for these two funds.")
+
+    if account_ccy:
+        # Convert both funds into the account currency so returns, volatility
+        # and drawdowns are what a holder of that currency actually experienced.
+        from pa import fx
+
+        f = data.fetch_fundamentals([stock_ticker, bond_ticker])
+        tc = {t: (f.loc[t].get("currency") if t in f.index else account_ccy)
+              for t in px.columns}
+        px = fx.convert_frame(px, tc, account_ccy).dropna()
 
     sw = stock_pct / 100.0
     mix_r = _mix_daily_returns(px, stock_ticker, bond_ticker, sw)

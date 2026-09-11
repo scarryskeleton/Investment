@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS practice_accounts (
     name          TEXT NOT NULL DEFAULT 'Practice',
     starting_cash REAL NOT NULL DEFAULT 10000,
     created_at    TEXT NOT NULL,
+    currency      TEXT NOT NULL DEFAULT 'EUR',
     UNIQUE (profile_id, name)
 );
 CREATE TABLE IF NOT EXISTS practice_trades (
@@ -53,16 +54,28 @@ CREATE TABLE IF NOT EXISTS practice_trades (
     ticker     TEXT NOT NULL,
     shares     REAL NOT NULL,
     price      REAL NOT NULL,
-    fee        REAL NOT NULL DEFAULT 0
+    fee        REAL NOT NULL DEFAULT 0,
+    ccy        TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 """
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
     """Additive column adds for databases created by an older version."""
-    cols = {r["name"] for r in conn.execute("PRAGMA table_info(practice_trades)")}
-    if "fee" not in cols:
+    tcols = {r["name"] for r in conn.execute("PRAGMA table_info(practice_trades)")}
+    if "fee" not in tcols:
         conn.execute("ALTER TABLE practice_trades ADD COLUMN fee REAL NOT NULL DEFAULT 0")
+    if "ccy" not in tcols:
+        conn.execute("ALTER TABLE practice_trades ADD COLUMN ccy TEXT NOT NULL DEFAULT ''")
+    acols = {r["name"] for r in conn.execute("PRAGMA table_info(practice_accounts)")}
+    if "currency" not in acols:
+        conn.execute(
+            "ALTER TABLE practice_accounts ADD COLUMN currency TEXT NOT NULL DEFAULT 'EUR'"
+        )
 
 
 def _now() -> str:
@@ -81,6 +94,24 @@ def init() -> None:
     with _connect() as conn:
         conn.executescript(_SCHEMA)
         _migrate(conn)
+
+
+# --------------------------------------------------------------------------- #
+# App-wide settings (simple key/value)
+# --------------------------------------------------------------------------- #
+def get_setting(key: str, default: str = "") -> str:
+    with _connect() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, str(value)),
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -261,7 +292,8 @@ def _clean_positions(df: pd.DataFrame) -> pd.DataFrame:
 # Practice ("paper trading") portfolio
 # --------------------------------------------------------------------------- #
 def practice_get_or_create(
-    profile: str, name: str = "Practice", starting_cash: float = 10_000.0
+    profile: str, name: str = "Practice", starting_cash: float = 10_000.0,
+    currency: str = "EUR",
 ) -> dict:
     with _connect() as conn:
         pid = _profile_id(conn, profile)
@@ -275,9 +307,10 @@ def practice_get_or_create(
         ).fetchone()
         if row is None:
             aid = conn.execute(
-                "INSERT INTO practice_accounts (profile_id, name, starting_cash, created_at) "
-                "VALUES (?, ?, ?, ?)",
-                (pid, name, float(starting_cash), _now()),
+                "INSERT INTO practice_accounts "
+                "(profile_id, name, starting_cash, created_at, currency) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (pid, name, float(starting_cash), _now(), currency),
             ).lastrowid
             row = conn.execute("SELECT * FROM practice_accounts WHERE id = ?", (aid,)).fetchone()
     return dict(row)
@@ -285,7 +318,7 @@ def practice_get_or_create(
 
 def practice_record_trade(
     account_id: int, side: str, ticker: str, shares: float, price: float,
-    fee: float = 0.0,
+    fee: float = 0.0, ccy: str = "",
 ) -> None:
     if side not in ("buy", "sell"):
         raise ValueError("side must be 'buy' or 'sell'")
@@ -293,22 +326,39 @@ def practice_record_trade(
         raise ValueError("shares and price must be positive")
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO practice_trades (account_id, ts, side, ticker, shares, price, fee) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO practice_trades "
+            "(account_id, ts, side, ticker, shares, price, fee, ccy) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (account_id, _now(), side, ticker.strip().upper(), float(shares),
-             float(price), max(0.0, float(fee))),
+             float(price), max(0.0, float(fee)), (ccy or "").strip().upper()),
+        )
+
+
+def practice_set_currency(account_id: int, currency: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE practice_accounts SET currency = ? WHERE id = ?",
+            ((currency or "EUR").strip().upper(), account_id),
+        )
+
+
+def practice_set_starting_cash(account_id: int, starting_cash: float) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE practice_accounts SET starting_cash = ? WHERE id = ?",
+            (float(starting_cash), account_id),
         )
 
 
 def practice_trades(account_id: int) -> pd.DataFrame:
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT ts, side, ticker, shares, price, fee FROM practice_trades "
+            "SELECT ts, side, ticker, shares, price, fee, ccy FROM practice_trades "
             "WHERE account_id = ? ORDER BY ts, id",
             (account_id,),
         ).fetchall()
     df = pd.DataFrame([dict(r) for r in rows],
-                      columns=["ts", "side", "ticker", "shares", "price", "fee"])
+                      columns=["ts", "side", "ticker", "shares", "price", "fee", "ccy"])
     if not df.empty:
         # stored as UTC ISO; drop the tz so it compares cleanly with naive price indexes
         df["ts"] = pd.to_datetime(df["ts"], utc=True).dt.tz_localize(None)

@@ -18,6 +18,7 @@ from pa import (
     education,
     explore,
     forecast,
+    fx,
     ideacard,
     metrics,
     optimize,
@@ -66,7 +67,7 @@ def _latest_prices(tickers):
 
 @st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
 def _origins(tickers):
-    """{ticker: {country, currency, name}} for the practice holdings."""
+    """{ticker: {country, currency, name, sector, industry}} for a set of tickers."""
     from pa import data
 
     if not tickers:
@@ -77,10 +78,34 @@ def _origins(tickers):
         row = f.loc[t].to_dict() if t in f.index else {}
         out[t] = {
             "country": (row.get("country") or "").strip(),
-            "currency": (row.get("currency") or "").strip().upper(),
+            "currency": (row.get("currency") or "").strip(),
             "name": row.get("name") or t,
+            "sector": (row.get("sector") or "").strip() or "Unknown",
+            "industry": (row.get("industry") or "").strip() or "Unknown",
+            "quote_type": (row.get("quote_type") or "").strip(),
         }
     return out
+
+
+@st.cache_data(show_spinner=False, ttl=60 * 30)
+def _fx_spot(native, account):
+    """Multiplier: 1 unit of `native` currency -> how many `account` units, now."""
+    if not native or native.upper() == account.upper():
+        return 1.0
+    try:
+        return float(fx.convert(native, account))
+    except Exception:
+        return 1.0
+
+
+@st.cache_data(show_spinner=False, ttl=60 * 60 * 6)
+def _fx_convert_history(prices, ticker_ccy, account):
+    """Convert a price-history DataFrame to `account` currency, per-column, with
+    each pair's own daily FX history."""
+    try:
+        return fx.convert_frame(prices, dict(ticker_ccy), account)
+    except Exception:
+        return prices
 
 
 # country name -> flag emoji, for the names yfinance returns most often
@@ -101,8 +126,9 @@ def _flag(country: str) -> str:
 
 
 @st.cache_data(show_spinner=False, ttl=60 * 60 * 6)
-def _explore_mix(stock_pct, stock_ticker, bond_ticker):
-    return explore.analyze_mix(stock_pct, stock_ticker, bond_ticker)
+def _explore_mix(stock_pct, stock_ticker, bond_ticker, account_ccy="EUR"):
+    return explore.analyze_mix(stock_pct, stock_ticker, bond_ticker,
+                               account_ccy=account_ccy)
 
 
 @st.cache_data(show_spinner=False)
@@ -227,8 +253,37 @@ _BOND_SLEEVES = {
     "TLT — 20+ year treasuries (volatile)": "TLT",
     "TIP — inflation-linked bonds": "TIP",
 }
-EUR = "€{:,.0f}"
-EUR2 = "€{:,.2f}"
+class _Fmt:
+    """Currency-aware money formatter.
+
+    ``.format(x)`` is kept so the many existing call sites need no change; the
+    bound currency is swapped at runtime once the user's choice is known.
+    """
+
+    def __init__(self, ccy: str = "EUR", dp: int = 0) -> None:
+        self.ccy = ccy
+        self.dp = dp
+
+    @property
+    def sym(self) -> str:
+        return fx.symbol(self.ccy)
+
+    def format(self, x) -> str:
+        try:
+            return f"{self.sym}{float(x):,.{self.dp}f}"
+        except (TypeError, ValueError):
+            return f"{self.sym}{x}"
+
+    def m(self, x) -> str:
+        """Markdown-safe: escape ``$`` so Streamlit doesn't read it as LaTeX."""
+        return self.format(x).replace("$", r"\$")
+
+
+# Module-level singletons; their ``.ccy`` is rebound in the sidebar to the
+# account currency, which propagates to every render function.
+EUR = _Fmt("EUR", 0)
+EUR2 = _Fmt("EUR", 2)
+ACCOUNT_CCY = "EUR"
 
 
 def render_explore() -> None:
@@ -258,8 +313,9 @@ def render_explore() -> None:
     stock_ticker, bond_ticker = _STOCK_SLEEVES[stock_label], _BOND_SLEEVES[bond_label]
 
     sb.subheader("A monthly savings plan")
-    start_value = sb.number_input("Starting amount (€)", 0, 5_000_000, 1_000, 250)
-    monthly_contribution = sb.number_input("Added every month (€)", 0, 200_000, 150, 25)
+    start_value = sb.number_input(f"Starting amount ({ACCOUNT_CCY})", 0, 5_000_000, 1_000, 250)
+    monthly_contribution = sb.number_input(f"Added every month ({ACCOUNT_CCY})", 0, 200_000,
+                                           150, 25)
     years = sb.slider("For how many years", 1, 40, 15)
     _sim_choice = sb.radio(
         "How to imagine the future",
@@ -281,7 +337,7 @@ def render_explore() -> None:
     )
 
     try:
-        m = _explore_mix(stock_pct, stock_ticker, bond_ticker)
+        m = _explore_mix(stock_pct, stock_ticker, bond_ticker, ACCOUNT_CCY)
     except Exception as e:
         st.error(f"Couldn't build that mix ({e}). Try different funds in the sidebar.")
         return
@@ -315,7 +371,7 @@ def render_explore() -> None:
                    "stocks buys more return — and more bumpiness.")
 
     with right:
-        st.subheader("Growth of €10,000")
+        st.subheader(f"Growth of {EUR.m(10_000)}")
         g = m.growth.copy()
         g.index.name = "date"
         fig = px.line(g)
@@ -323,11 +379,12 @@ def render_explore() -> None:
                           margin=dict(t=10, b=10),
                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
         st.plotly_chart(fig, use_container_width=True)
-        st.caption(f"{m.start:%b %Y} – {m.end:%b %Y}. The 'Cash / savings' line "
+        st.caption(f"{m.start:%b %Y} – {m.end:%b %Y}, in **{ACCOUNT_CCY}** "
+                   "(funds converted at historical rates). The 'Cash / savings' line "
                    "assumes a steady 3%/yr — notice how inflation-era savings barely move.")
 
     st.divider()
-    st.subheader(f"If you add {EUR.format(monthly_contribution)} every month for {years} years")
+    st.subheader(f"If you add {EUR.m(monthly_contribution)} every month for {years} years")
 
     with st.spinner("Simulating…" if sim_method == "bootstrap" else "Training the generator…"):
         proj = _explore_projection(
@@ -349,7 +406,8 @@ def render_explore() -> None:
                              name="typical (median)"))
     fig.add_trace(go.Scatter(x=yrs, y=proj.contributed, line=dict(color="#999", dash="dash"),
                              name="money you put in"))
-    fig.update_layout(height=380, xaxis_title="years from now", yaxis_title="portfolio value (€)",
+    fig.update_layout(height=380, xaxis_title="years from now",
+                      yaxis_title=f"portfolio value ({ACCOUNT_CCY})",
                       margin=dict(t=10, b=10),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02))
     st.plotly_chart(fig, use_container_width=True)
@@ -385,8 +443,8 @@ def render_explore() -> None:
     _gap = proj.fee_low_median - proj.fee_high_median
     st.warning(
         f"**Fees:** the same plan in a fund charging **{proj.fee_high_pct:.2%}/yr** "
-        f"instead of **{proj.fee_low_pct:.2%}/yr** ends near {EUR.format(proj.fee_high_median)} "
-        f"vs {EUR.format(proj.fee_low_median)} — about **{EUR.format(_gap)} lost to fees** "
+        f"instead of **{proj.fee_low_pct:.2%}/yr** ends near {EUR.m(proj.fee_high_median)} "
+        f"vs {EUR.m(proj.fee_low_median)} — about **{EUR.m(_gap)} lost to fees** "
         f"over {years} years, and the gap compounds the longer you invest. Broad "
         "index ETFs are typically at the low end."
     )
@@ -603,7 +661,11 @@ def render_research() -> None:
 
     # ---- Key stats ----
     st.subheader("Key stats")
-    stats = research.key_stats(p, last_price=b["last"])
+    _sec_sym = fx.symbol(p.get("currency") or "USD")
+    stats = research.key_stats(p, last_price=b["last"], sym=_sec_sym)
+    if p.get("currency") and fx.normalize(p["currency"])[0] not in ("USD", ""):
+        st.caption(f"Figures below are in **{fx.normalize(p['currency'])[0]}**, "
+                   "the security's own currency — not your account currency.")
     extra_tickers = [t.strip().upper() for t in extra.replace(",", " ").split() if t.strip()]
     extra_tickers = [t for t in extra_tickers if t != ticker][:2]
     if extra_tickers:
@@ -611,7 +673,9 @@ def render_research() -> None:
         for et in extra_tickers:
             eb = _research_bundle(et, benchmark, lookback)
             if eb:
-                cols[et] = dict(research.key_stats(eb["profile"], last_price=eb["last"]))
+                cols[et] = dict(research.key_stats(
+                    eb["profile"], last_price=eb["last"],
+                    sym=fx.symbol(eb["profile"].get("currency") or "USD")))
         labels = list(dict.fromkeys(k for c in cols.values() for k in c))
         table = pd.DataFrame(
             {tk: [c.get(lbl, "—") for lbl in labels] for tk, c in cols.items()},
@@ -637,7 +701,7 @@ def render_research() -> None:
 
     # ---- What's expected next ----
     est = b.get("estimates") or {}
-    est_rows, est_tips = research.estimates_summary(est)
+    est_rows, est_tips = research.estimates_summary(est, sym=_sec_sym)
     if est.get("next_earnings") or est_rows:
         st.subheader("What's expected next")
         if est.get("next_earnings"):
@@ -755,17 +819,18 @@ def render_research() -> None:
 def _paper_fee_model() -> paper.FeeModel:
     """Render the 'Trading costs' expander and return the chosen fee model."""
     names = list(paper.PRESETS) + ["Custom…"]
-    default = "Typical EU broker (0.25% FX)"
+    default = "Low-cost broker (0.25% FX only)"
     with st.expander("⚙️ Trading costs", expanded=False):
         choice = st.selectbox(
             "Cost model", names, index=names.index(default), key="paper_fee_choice",
-            help="Applied to every buy and sell. Prices aren't currency-converted, "
-                 "so the FX fee stands in for the real cost of holding foreign names.",
+            help="Applied to every buy and sell. The FX fee is charged on any "
+                 f"holding not quoted in {ACCOUNT_CCY}, on top of the currency "
+                 "conversion already reflected in the price.",
         )
         if choice == "Custom…":
             fc = st.columns(3)
             m = paper.FeeModel(
-                flat=fc[0].number_input("Flat €/trade", 0.0, 100.0, 0.0, 0.5,
+                flat=fc[0].number_input(f"Flat {ACCOUNT_CCY}/trade", 0.0, 100.0, 0.0, 0.5,
                                         key="paper_fee_flat"),
                 rate_bps=fc[1].number_input("Commission (bps)", 0.0, 200.0, 0.0, 1.0,
                                             key="paper_fee_bps",
@@ -778,11 +843,11 @@ def _paper_fee_model() -> paper.FeeModel:
         if m.active:
             bits = []
             if m.flat:
-                bits.append(f"€{m.flat:g} per trade")
+                bits.append(f"{m.flat:g} {ACCOUNT_CCY} per trade")
             if m.rate_bps:
                 bits.append(f"{m.rate_bps:g} bps commission")
             if m.fx_bps:
-                bits.append(f"{m.fx_bps:g} bps FX fee on non-EUR names")
+                bits.append(f"{m.fx_bps:g} bps FX fee on non-{ACCOUNT_CCY} names")
             st.caption("Charging " + ", ".join(bits)
                        + ". Fees are folded into cost basis on buys and taken off "
                        "the proceeds on sells.")
@@ -791,53 +856,95 @@ def _paper_fee_model() -> paper.FeeModel:
     return m
 
 
-def _render_paper_overview(state: paper.PaperState) -> None:
-    """Portfolio overview for the practice account: where the money sits by
-    country and by currency, and how much of it is FX-exposed."""
+def _convert_trades(trades: pd.DataFrame, account: str) -> pd.DataFrame:
+    """Return the trade log with ``price`` and ``fee`` converted from each
+    trade's native currency (``ccy``) into ``account`` at that trade date's
+    historical exchange rate."""
+    if trades is None or trades.empty:
+        return trades
+    out = trades.copy()
+    days = pd.to_datetime(out["ts"]).dt.normalize()
+    mult = pd.Series(1.0, index=out.index)
+    natv = out["ccy"].fillna("").replace("", account)
+    for nat in sorted(set(natv)):
+        code, _ = fx.normalize(nat)
+        if not code or code == account.upper():
+            continue
+        uniq = pd.DatetimeIndex(sorted(days.unique()))
+        s = fx.convert(nat, account, index=uniq)
+        lookup = dict(zip(uniq, list(s.values)))
+        sel = natv == nat
+        mult.loc[sel] = days.loc[sel].map(lookup).astype(float).values
+    out["price"] = out["price"] * mult.values
+    out["fee"] = out["fee"] * mult.values
+    return out
+
+
+def _render_paper_overview(state: paper.PaperState, account: str) -> None:
+    """Where the practice money sits — by business market (sector) and by
+    country — with the tickers that make up each slice, plus FX exposure."""
     invested = state.invested or 1.0
-    rows = [{"ticker": p.ticker, "value": p.market_value,
+    rows = [{"ticker": p.ticker,
+             "name": p.name or p.ticker,
+             "value": p.market_value,
+             "sector": p.sector or "Unknown",
              "country": p.country or "Unknown",
-             "currency": p.currency or "—"} for p in state.positions]
+             "currency": (fx.normalize(p.currency)[0] or "—")} for p in state.positions]
     df = pd.DataFrame(rows)
 
-    by_country = (df.groupby("country")["value"].sum()
-                  .sort_values(ascending=True) / invested * 100)
-    by_ccy = (df.groupby("currency")["value"].sum()
-              .sort_values(ascending=False) / invested * 100)
-    foreign_pct = float(by_ccy[[c for c in by_ccy.index if c not in ("EUR", "—")]].sum())
+    def _slice(col: str) -> pd.DataFrame:
+        g = df.groupby(col).agg(
+            pct=("value", lambda s: s.sum() / invested * 100),
+            tickers=("ticker", lambda s: ", ".join(sorted(s))),
+        ).sort_values("pct", ascending=False)
+        return g
+
+    by_sector = _slice("sector")
+    by_country = _slice("country")
+    by_ccy = (df.groupby("currency")["value"].sum().sort_values(ascending=False)
+              / invested * 100)
+    foreign_pct = float(by_ccy[[c for c in by_ccy.index
+                                if c not in (account.upper(), "—")]].sum())
 
     st.subheader("Portfolio overview")
-    oc = st.columns([3, 2])
 
-    fig = px.bar(
-        x=by_country.values, y=by_country.index, orientation="h",
-        labels={"x": "% of holdings", "y": ""},
-        text=[f"{v:.0f}%" for v in by_country.values],
+    bar = px.bar(
+        by_sector.reset_index(), x="pct", y="sector", orientation="h",
+        text=[f"{v:.0f}%" for v in by_sector["pct"]],
+        hover_data={"tickers": True, "pct": ":.1f", "sector": False},
+        labels={"pct": "% of holdings", "sector": ""},
     )
-    fig.update_traces(marker_color="#4c78a8", textposition="outside", cliponaxis=False)
-    fig.update_layout(height=max(160, 42 * len(by_country) + 60),
+    bar.update_traces(marker_color="#4c78a8", textposition="outside", cliponaxis=False)
+    bar.update_layout(height=max(180, 40 * len(by_sector) + 70),
                       margin=dict(t=10, b=10, l=10, r=30), xaxis_title="% of holdings")
-    oc[0].caption("By country of origin")
-    oc[0].plotly_chart(fig, use_container_width=True)
+    st.caption("By business market (sector)")
+    st.plotly_chart(bar, use_container_width=True)
 
+    oc = st.columns([3, 2])
+    sdf = by_sector.reset_index()
+    sdf["% of holdings"] = sdf["pct"].round(1)
+    oc[0].caption("Sectors and their holdings")
+    oc[0].dataframe(sdf[["sector", "% of holdings", "tickers"]]
+                    .rename(columns={"sector": "Market", "tickers": "Tickers"}),
+                    hide_index=True, use_container_width=True)
+
+    cdf = pd.DataFrame({"Currency": by_ccy.index, "% of holdings": by_ccy.values.round(1)})
     oc[1].caption("By currency")
-    cdf = pd.DataFrame({"Currency": by_ccy.index,
-                        "% of holdings": by_ccy.values.round(1)})
     oc[1].dataframe(cdf, hide_index=True, use_container_width=True)
     oc[1].metric("Foreign-currency exposure", f"{foreign_pct:.0f}%",
-                 help="Share of your invested value in securities not quoted in "
-                      "EUR. That slice carries currency risk and, here, an FX fee "
-                      "on every trade.")
+                 help=f"Share of invested value in securities not quoted in "
+                      f"{account}. That slice carries currency risk (already "
+                      "reflected in your P&L) and an FX fee on every trade.")
 
-    n_countries = df["country"].nunique()
-    top = by_country.sort_values(ascending=False)
-    lead = top.index[0] if len(top) else "—"
+    n_sec = df["sector"].nunique()
+    lead = by_sector.index[0] if len(by_sector) else "—"
+    ctry = by_country.index[0] if len(by_country) else "—"
     st.caption(
-        f"Holdings span **{n_countries}** "
-        f"countr{'y' if n_countries == 1 else 'ies'}, most in **{lead}** "
-        f"({top.iloc[0]:.0f}%). Country and currency come from Yahoo Finance and "
-        "can be rough for funds — an ETF is tagged where it is *domiciled*, not "
-        "where it invests."
+        f"Holdings span **{n_sec}** market{'' if n_sec == 1 else 's'}, most in "
+        f"**{lead}** ({by_sector['pct'].iloc[0]:.0f}%); biggest country is "
+        f"**{ctry}** ({by_country['pct'].iloc[0]:.0f}%). Sector, country and "
+        "currency come from Yahoo Finance and can be rough for funds — an ETF is "
+        "tagged where it is *domiciled*, not where it invests."
     )
 
 
@@ -873,23 +980,45 @@ def render_paper() -> None:
 
     profile = _ch
     st.session_state.profile = _ch
-    acc = store.practice_get_or_create(profile)
+    acc = store.practice_get_or_create(profile, currency=ACCOUNT_CCY)
     aid = acc["id"]
-    starting = float(acc["starting_cash"])
-    trades = store.practice_trades(aid)
-    held = sorted(set(trades["ticker"])) if not trades.empty else []
+    acct_ccy = ACCOUNT_CCY
+    stored_ccy = (acc["currency"] or "EUR").upper()
+    # starting cash was typed in `stored_ccy`; show it in the active currency
+    starting = float(acc["starting_cash"]) * _fx_spot(stored_ccy, acct_ccy)
 
-    latest = _latest_prices(tuple(held + ["SPY"])) if held else {}
+    trades_raw = store.practice_trades(aid)
+    held = sorted(set(trades_raw["ticker"])) if not trades_raw.empty else []
+    origins = _origins(tuple(held))
+    ticker_ccy = {t: (origins.get(t, {}).get("currency") or acct_ccy) for t in held}
+
+    # fill in the native currency on any trade that predates the ccy column
+    trades = trades_raw.copy()
+    if not trades.empty:
+        trades["ccy"] = [c or ticker_ccy.get(tk, acct_ccy)
+                         for c, tk in zip(trades["ccy"], trades["ticker"])]
+    trades = _convert_trades(trades, acct_ccy)
+
+    latest_raw = _latest_prices(tuple(held + ["SPY"])) if held else {}
+    latest = {t: v * _fx_spot("USD" if t == "SPY" else ticker_ccy.get(t, acct_ccy),
+                              acct_ccy)
+              for t, v in latest_raw.items()}
     state = paper.compute_state(starting, trades, latest)
 
-    origins = _origins(tuple(held))
     for p in state.positions:
         o = origins.get(p.ticker, {})
-        p.country, p.currency = o.get("country", ""), o.get("currency", "")
+        p.country = o.get("country", "")
+        p.currency = o.get("currency", "")
+        p.sector = o.get("sector", "")
+        p.name = o.get("name", p.ticker)
 
+    _mix = (" Converted to your currency at historical rates, so exchange-rate "
+            "moves are part of the result." if any(
+                fx.normalize(c)[0] not in (acct_ccy, "") for c in ticker_ccy.values())
+            else "")
     st.caption(f"Fake money, **real prices**. Profile **{profile}**, started with "
-               f"{EUR.format(starting)}. Prices are the latest close (delayed), each "
-               "in its own native currency. A place to learn, not a broker.")
+               f"**{EUR.m(starting)}**, all in **{acct_ccy}**.{_mix} "
+               "A place to learn, not a broker.")
     if state.missing_prices:
         st.warning("No current price for: " + ", ".join(state.missing_prices)
                    + " — valued at cost for now.")
@@ -899,7 +1028,9 @@ def render_paper() -> None:
     # ---- headline ----
     ec = pd.DataFrame()
     if not trades.empty:
-        hist = _universe_prices(tuple(sorted(set(held + ["SPY"]))), 3.0)
+        hist_raw = _universe_prices(tuple(sorted(set(held + ["SPY"]))), 3.0)
+        hist = _fx_convert_history(
+            hist_raw, tuple({**ticker_ccy, "SPY": "USD"}.items()), acct_ccy)
         cols = [t for t in held if t in hist.columns]
         ec = paper.equity_curve(
             starting, trades, hist[cols] if cols else hist.iloc[:, :0],
@@ -926,35 +1057,40 @@ def render_paper() -> None:
     tk = tc[0].text_input("Ticker", key="paper_tk",
                           placeholder="AAPL, MSFT, BND, VWO, GLD…").upper().strip()
     side = tc[1].radio("Side", ["Buy", "Sell"], horizontal=True, key="paper_side")
-    by = tc[2].radio("Amount as", ["shares", "€"], horizontal=True, key="paper_by")
+    by = tc[2].radio("Amount as", ["shares", acct_ccy], horizontal=True, key="paper_by")
 
-    price_now = None
+    price_native = None
     if tk:
-        price_now = _latest_prices((tk, "SPY")).get(tk)
-    if tk and not price_now:
+        price_native = _latest_prices((tk, "SPY")).get(tk)
+    if tk and not price_native:
         st.warning(f"No price found for **{tk}** — check the ticker.")
     elif tk:
         origin = _origins((tk,)).get(tk, {})
         cur = origin.get("currency", "")
-        foreign = bool(cur) and cur != "EUR"
+        nat_code = fx.normalize(cur)[0]
+        foreign = bool(nat_code) and nat_code != acct_ccy
+        rate = _fx_spot(cur or acct_ccy, acct_ccy)
+        price_now = price_native * rate           # in account currency
         qc = st.columns([1, 3])
         if by == "shares":
             qty = qc[0].number_input("Shares", 0.0, 1e7, 1.0, 1.0, key="paper_qty")
             shares = float(qty)
         else:
-            amt = qc[0].number_input("Euros", 0.0, 1e9, 500.0, 50.0, key="paper_amt")
+            amt = qc[0].number_input(f"Amount ({acct_ccy})", 0.0, 1e9, 500.0, 50.0,
+                                     key="paper_amt")
             shares = float(amt) / price_now
         value = shares * price_now
         fee = fees.fee(value, foreign)
         cash_out = value + fee if side == "Buy" else value - fee
-        _origin_bit = (f" · {_flag(origin.get('country',''))} {origin.get('country','')}"
-                       f" ({cur})" if cur else "")
-        _fee_bit = (f" · fee **{EUR2.format(fee)}**"
+        _fx_bit = (f" *(≈ {price_native:,.2f} {cur or nat_code})*" if foreign else "")
+        _origin_bit = (f" · {_flag(origin.get('country',''))} "
+                       f"{origin.get('country','')}" if origin.get("country") else "")
+        _fee_bit = (f" · fee **{EUR2.m(fee)}**"
                     + (" *(incl. FX)*" if foreign and fees.fx_bps else "")) if fee else ""
         qc[1].markdown(
-            f"&nbsp;\n\n**{tk}** at **{EUR.format(price_now)}**{_origin_bit} → "
-            f"{side.lower()} **{shares:,.4f}** shares = **{EUR.format(value)}**{_fee_bit}"
-            + (f" → **{EUR2.format(cash_out)}** {'out' if side == 'Buy' else 'in'}"
+            f"&nbsp;\n\n**{tk}** at **{EUR.m(price_now)}**{_fx_bit}{_origin_bit} → "
+            f"{side.lower()} **{shares:,.4f}** shares = **{EUR.m(value)}**{_fee_bit}"
+            + (f" → **{EUR2.m(cash_out)}** {'out' if side == 'Buy' else 'in'}"
                if fee else "")
         )
         pos = next((p for p in state.positions if p.ticker == tk), None)
@@ -962,15 +1098,19 @@ def render_paper() -> None:
             if shares <= 0:
                 st.error("Enter a positive amount.")
             elif side == "Buy" and value + fee > state.cash + 1e-6:
-                st.error(f"Not enough cash — {EUR2.format(value)} + {EUR2.format(fee)} "
-                         f"fee, you have {EUR2.format(state.cash)}.")
+                st.error(f"Not enough cash — {EUR2.m(value)} + {EUR2.m(fee)} "
+                         f"fee, you have {EUR2.m(state.cash)}.")
             elif side == "Sell" and (pos is None or shares > pos.shares + 1e-6):
                 st.error(f"You only hold {pos.shares:,.4f} {tk}." if pos
                          else f"You don't hold any {tk}.")
             else:
-                store.practice_record_trade(aid, side.lower(), tk, shares, price_now, fee)
-                st.toast(f"{side} {shares:,.4f} {tk} @ {EUR.format(price_now)}"
-                         + (f"  (fee {EUR2.format(fee)})" if fee else ""), icon="🎮")
+                # store native price + its currency; fee back in native units so a
+                # later currency switch reconverts both consistently
+                store.practice_record_trade(
+                    aid, side.lower(), tk, shares, price_native,
+                    fee / rate if rate else fee, cur or acct_ccy)
+                st.toast(f"{side} {shares:,.4f} {tk} @ {EUR.m(price_now)}"
+                         + (f"  (fee {EUR2.m(fee)})" if fee else ""), icon="🎮")
                 st.rerun()
 
     # ---- holdings ----
@@ -978,13 +1118,14 @@ def render_paper() -> None:
         st.subheader("Your holdings")
         hdf = pd.DataFrame([{
             "Ticker": p.ticker,
+            "Market": p.sector or "—",
             "Origin": f"{_flag(p.country)} {p.country or '—'}",
-            "Ccy": p.currency or "—",
+            "Ccy": fx.normalize(p.currency)[0] or "—",
             "Shares": round(p.shares, 4),
-            "Avg cost": round(p.avg_cost, 2),
-            "Price now": round(p.last_price, 2),
-            "Value (€)": round(p.market_value, 0),
-            "P&L (€)": round(p.unrealized, 0),
+            f"Avg cost ({acct_ccy})": round(p.avg_cost, 2),
+            f"Price now ({acct_ccy})": round(p.last_price, 2),
+            f"Value ({acct_ccy})": round(p.market_value, 0),
+            f"P&L ({acct_ccy})": round(p.unrealized, 0),
             "P&L %": round(p.unrealized_pct * 100, 1),
             "Weight %": round(p.weight * 100, 1),
         } for p in state.positions])
@@ -996,7 +1137,7 @@ def render_paper() -> None:
                     help="Total commission + FX fees across every trade so far.")
         d[3].metric("Trades made", state.n_trades)
 
-        _render_paper_overview(state)
+        _render_paper_overview(state, acct_ccy)
     elif trades.empty:
         st.info("No trades yet. Pick a ticker above and buy something to get started — "
                 "try a broad ETF like **VTI** or **BND**, or a company you know.")
@@ -1007,7 +1148,8 @@ def render_paper() -> None:
         fig = px.line(ec)
         fig.add_hline(y=starting, line=dict(color="#888", dash="dot"),
                       annotation_text="you started here")
-        fig.update_layout(height=360, margin=dict(t=10, b=10), yaxis_title="value (€)",
+        fig.update_layout(height=360, margin=dict(t=10, b=10),
+                          yaxis_title=f"value ({acct_ccy})",
                           xaxis_title="", legend_title="",
                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
         st.plotly_chart(fig, use_container_width=True)
@@ -1015,37 +1157,43 @@ def render_paper() -> None:
             you, spy = ec["Your portfolio"].iloc[-1], ec["All-in S&P 500"].iloc[-1]
             diff = you - spy
             st.markdown(
-                f"Since your first trade you're at **{EUR.format(you)}** vs "
-                f"**{EUR.format(spy)}** if you'd just bought the S&P 500 — "
-                f"**{EUR.format(abs(diff))} {'ahead' if diff >= 0 else 'behind'}**. "
+                f"Since your first trade you're at **{EUR.m(you)}** vs "
+                f"**{EUR.m(spy)}** if you'd just bought the S&P 500 — "
+                f"**{EUR.m(abs(diff))} {'ahead' if diff >= 0 else 'behind'}**. "
                 "Beating the market consistently is *hard* — that's the lesson."
             )
 
     # ---- log & reset ----
-    if not trades.empty:
+    if not trades_raw.empty:
         with st.expander("Trade log"):
             log = trades.copy()
             log["ts"] = log["ts"].dt.strftime("%Y-%m-%d %H:%M")
-            log["value"] = (log["shares"] * log["price"]).round(0)
-            if "fee" in log.columns:
-                log["fee"] = log["fee"].round(2)
+            log = log.rename(columns={"price": f"price ({acct_ccy})",
+                                      "fee": f"fee ({acct_ccy})", "ccy": "native"})
+            log[f"value ({acct_ccy})"] = (log["shares"] * log[f"price ({acct_ccy})"]).round(0)
+            log[f"price ({acct_ccy})"] = log[f"price ({acct_ccy})"].round(2)
+            log[f"fee ({acct_ccy})"] = log[f"fee ({acct_ccy})"].round(2)
             st.dataframe(log.iloc[::-1], hide_index=True, use_container_width=True)
+            st.caption("Prices shown converted to " + acct_ccy
+                       + " at each trade date's exchange rate.")
             if st.button("Undo last trade"):
                 store.practice_undo_last(aid)
                 st.rerun()
 
     with st.expander("Start over"):
-        newcash = st.number_input("Fresh starting cash (€)", 100.0, 1e8, starting, 500.0)
+        newcash = st.number_input(f"Fresh starting cash ({acct_ccy})", 100.0, 1e8,
+                                  float(round(starting)), 500.0)
         if st.button("Reset this practice portfolio", type="secondary"):
             store.practice_reset(aid, newcash)
+            store.practice_set_currency(aid, acct_ccy)
             st.toast("Practice portfolio reset.", icon="♻️")
             st.rerun()
 
     st.divider()
-    st.caption("Paper trading — no real money. Prices are delayed closes in each "
-               "security's native currency (not FX-converted). Commission and an FX "
-               "fee are modelled; spreads, slippage, dividends and taxes are not, so "
-               "real results would still differ. This is a learning sandbox.")
+    st.caption(f"Paper trading — no real money. Prices are delayed closes, converted "
+               f"to {acct_ccy} at historical exchange rates. Commission and an FX fee "
+               "are modelled; spreads, slippage, dividends and taxes are not, so real "
+               "results would still differ. This is a learning sandbox.")
 
 
 # --------------------------------------------------------------------------- #
@@ -1054,6 +1202,22 @@ def render_paper() -> None:
 sb = st.sidebar
 sb.title("📊 Portfolio Suggestions")
 sb.caption("Decision-support only — not investment advice.")
+
+_saved_ccy = store.get_setting("currency", "EUR")
+_ccy_idx = fx.CURRENCIES.index(_saved_ccy) if _saved_ccy in fx.CURRENCIES else 0
+ACCOUNT_CCY = sb.selectbox(
+    "Currency", fx.CURRENCIES, index=_ccy_idx,
+    format_func=lambda c: f"{c} · {fx.symbol(c).strip()}",
+    help="Everything below is shown and calculated in this currency. Prices in "
+         "other currencies are converted with historical exchange rates, so "
+         "currency moves show up in your returns.",
+)
+if ACCOUNT_CCY != _saved_ccy:
+    store.set_setting("currency", ACCOUNT_CCY)
+EUR.ccy = ACCOUNT_CCY
+EUR2.ccy = ACCOUNT_CCY
+CCY_SYM = fx.symbol(ACCOUNT_CCY).strip() or ACCOUNT_CCY
+sb.divider()
 
 app_mode = sb.radio(
     "Mode",
@@ -1269,6 +1433,11 @@ if run:
         st.stop()
     mode = st.session_state.amount_mode
     latest = _latest_prices(tuple(sorted(parsed.index))) if mode == "shares" else None
+    if mode == "shares" and latest:
+        _meta = _origins(tuple(sorted(parsed.index)))
+        latest = {t: v * _fx_spot(_meta.get(t, {}).get("currency") or ACCOUNT_CCY,
+                                  ACCOUNT_CCY)
+                  for t, v in latest.items()}
     weights = portfolio.to_weights(
         parsed, mode=mode, latest_prices=pd.Series(latest) if latest else None
     )
@@ -1667,12 +1836,12 @@ with tab_plan:
 
     _pv = st.session_state.get("portfolio_value")
     if _pv:
-        st.metric("Portfolio value (from your holdings)", f"€{_pv:,.0f}")
+        st.metric("Portfolio value (from your holdings)", EUR.format(_pv))
     else:
         _pv = st.number_input(
-            "Your portfolio's total value (€)", min_value=100.0, max_value=1e9,
-            value=10_000.0, step=500.0,
-            help="You entered weights, so the tool doesn't know the euro amount.")
+            f"Your portfolio's total value ({ACCOUNT_CCY})", min_value=100.0,
+            max_value=1e9, value=10_000.0, step=500.0,
+            help="You entered weights, so the tool doesn't know the cash amount.")
 
     _held = list(A.holdings_weights)
     _optres = st.session_state.get("opt_results") or {}
@@ -1712,7 +1881,7 @@ with tab_plan:
                                  "Wider = fewer, larger trades.")
     _band = _band_pp / 100.0
     _contrib = oc[1].number_input(
-        "New money to add now (€) — for Option B", 0.0, 1e8, 0.0, 100.0,
+        f"New money to add now ({ACCOUNT_CCY}) — for Option B", 0.0, 1e8, 0.0, 100.0,
         help="A lump sum or a monthly contribution. Option B below shows how to "
              "split it across your underweight holdings.")
 
@@ -1749,10 +1918,10 @@ with tab_plan:
 
         if pl.needs_rebalance:
             st.subheader("Option A — rebalance now (involves selling)")
-            tr = [{"Action": "SELL", "Ticker": r.ticker, "Amount": f"€{abs(r.trade_value):,.0f}"}
-                  for r in pl.sells]
-            tr += [{"Action": "BUY", "Ticker": r.ticker, "Amount": f"€{r.trade_value:,.0f}"}
-                   for r in pl.buys]
+            tr = [{"Action": "SELL", "Ticker": r.ticker,
+                   "Amount": EUR.format(abs(r.trade_value))} for r in pl.sells]
+            tr += [{"Action": "BUY", "Ticker": r.ticker,
+                    "Amount": EUR.format(r.trade_value)} for r in pl.buys]
             st.dataframe(pd.DataFrame(tr), hide_index=True, use_container_width=True)
             st.caption("Selling winners in a taxable account can trigger capital-gains "
                        "tax — in a tax-sheltered account it's free. Option B avoids it.")
@@ -1766,10 +1935,10 @@ with tab_plan:
                     "drifting toward target with **no selling and no capital-gains tax**. "
                     "Done with every contribution, it can replace Option A entirely.")
         else:
-            cs = [{"Ticker": t, "Add": f"€{v:,.0f}",
+            cs = [{"Ticker": t, "Add": EUR.format(v),
                    "→ new weight": f"{(A.holdings_weights.get(t, 0) * _pv + v) / (_pv + _contrib):.1%}"}
                   for t, v in sorted(pl.contribution_split.items(), key=lambda kv: -kv[1]) if v > 1]
-            st.markdown(f"Split your **€{_contrib:,.0f}** like this:")
+            st.markdown(f"Split your **{EUR.m(_contrib)}** like this:")
             st.dataframe(pd.DataFrame(cs), hide_index=True, use_container_width=True)
             st.caption("New money flows to whatever is most underweight first, nudging "
                        "you toward target with zero tax drag. Do this with every "
@@ -2126,8 +2295,9 @@ with tab_timing:
                         "got rewarded. That's the exception: for a broad rising market "
                         "(try **SPY**) investing now usually wins. It depends on the asset.")
             st.caption(
-                f"Median over {dh}y: €1 → **€{dw.median_now_multiple:.2f}** now vs "
-                f"**€{dw.median_wait_multiple:.2f}** waiting for a {dip_pct}% dip. " + _msg
+                f"Median over {dh}y: {EUR2.m(1)} → **{EUR2.m(dw.median_now_multiple)}** "
+                f"now vs **{EUR2.m(dw.median_wait_multiple)}** waiting for a "
+                f"{dip_pct}% dip. " + _msg
             )
 
     st.divider()

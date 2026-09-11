@@ -143,8 +143,13 @@ def browse_table(
     return df.set_index("Ticker") if not df.empty else df
 
 
-def key_stats(profile: dict, last_price: float | None = None) -> list[tuple[str, str]]:
-    """A tidy (label, formatted value) list for a stats table."""
+def key_stats(profile: dict, last_price: float | None = None,
+              sym: str = "$") -> list[tuple[str, str]]:
+    """A tidy (label, formatted value) list for a stats table.
+
+    ``sym`` is the security's own currency symbol — market cap, EPS, target
+    price and the 52-week range are in that currency, not the account's.
+    """
     p = profile
     out: list[tuple[str, str]] = []
 
@@ -158,7 +163,8 @@ def key_stats(profile: dict, last_price: float | None = None) -> list[tuple[str,
 
     mc = _num(p.get("market_cap"))
     if mc == mc and mc > 0:
-        out.append(("Market cap", f"${mc/1e12:.2f}T" if mc >= 1e12 else f"${mc/1e9:.1f}B"))
+        out.append(("Market cap",
+                    f"{sym}{mc/1e12:.2f}T" if mc >= 1e12 else f"{sym}{mc/1e9:.1f}B"))
     out += [
         ("Trailing P/E", num(p.get("trailing_pe"))),
         ("Forward P/E", num(p.get("forward_pe"))),
@@ -190,24 +196,25 @@ def key_stats(profile: dict, last_price: float | None = None) -> list[tuple[str,
     return [(k, v) for k, v in out if v not in ("—", "")]
 
 
-def _money(v):
+def _money(v, sym: str = "$"):
     v = _num(v)
     if v != v:
         return "—"
     a = abs(v)
     if a >= 1e12:
-        return f"${v/1e12:.2f}T"
+        return f"{sym}{v/1e12:.2f}T"
     if a >= 1e9:
-        return f"${v/1e9:.1f}B"
+        return f"{sym}{v/1e9:.1f}B"
     if a >= 1e6:
-        return f"${v/1e6:.0f}M"
-    return f"${v:,.2f}"
+        return f"{sym}{v/1e6:.0f}M"
+    return f"{sym}{v:,.2f}"
 
 
-def estimates_summary(est: dict) -> tuple[list[tuple[str, str, str]], list[str]]:
+def estimates_summary(est: dict, sym: str = "$") -> tuple[list[tuple[str, str, str]], list[str]]:
     """(table rows, insight lines) for the 'What's expected next' section.
 
-    Rows are (label, next-quarter value, next-year value).
+    Rows are (label, next-quarter value, next-year value). ``sym`` is the
+    company's reporting-currency symbol.
     """
     if not est or not est.get("periods"):
         return [], []
@@ -220,10 +227,12 @@ def estimates_summary(est: dict) -> tuple[list[tuple[str, str, str]], list[str]]
 
     def eps(v):
         v = _num(v)
-        return f"${v:.2f}" if v == v else "—"
+        return f"{sym}{v:.2f}" if v == v else "—"
+
+    _money_ = lambda v: _money(v, sym)  # noqa: E731
 
     rows = [
-        ("Revenue (consensus)", _money(q.get("rev_avg")), _money(y.get("rev_avg"))),
+        ("Revenue (consensus)", _money_(q.get("rev_avg")), _money_(y.get("rev_avg"))),
         ("  …growth vs a year ago", g(q.get("rev_growth")), g(y.get("rev_growth"))),
         ("Earnings per share", eps(q.get("eps_avg")), eps(y.get("eps_avg"))),
         ("  …growth vs a year ago", g(q.get("eps_growth")), g(y.get("eps_growth"))),
