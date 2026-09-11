@@ -39,6 +39,17 @@ def _price_path(ticker: str, start: str, end: str) -> Path:
     return _PRICE_CACHE / f"{safe}__{start}__{end}.parquet"
 
 
+def _extract_close(raw: pd.DataFrame, fallback_ticker: str) -> pd.DataFrame:
+    """Normalize a ``yf.download`` result to a plain ticker-columned close-price
+    frame, whether yfinance handed back single- or multi-index columns."""
+    if raw is None or raw.empty:
+        return pd.DataFrame()
+    close = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+    if isinstance(close, pd.Series):  # single ticker, single-index columns
+        close = close.to_frame(fallback_ticker)
+    return close
+
+
 def fetch_prices(
     tickers,
     lookback_years: float = 5.0,
@@ -88,9 +99,7 @@ def fetch_prices(
             group_by="column",
         )
         if not raw.empty:
-            close = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
-            if isinstance(close, pd.Series):  # single ticker
-                close = close.to_frame(missing[0])
+            close = _extract_close(raw, missing[0])
             for t in missing:
                 if t in close.columns:
                     s = close[t].dropna()
@@ -116,6 +125,60 @@ def fetch_prices(
     # drop leading rows with any NaN so every series starts together.
     df = df.dropna()
     return df
+
+
+_INTRADAY_TTL = timedelta(minutes=15)
+
+
+def fetch_intraday(
+    ticker: str, period: str = "5d", interval: str = "60m"
+) -> tuple[pd.Series, str]:
+    """How one ticker has moved recently, at fine (hourly by default) grain.
+
+    Yahoo only keeps a limited window of intraday bars and some listings
+    don't offer them at all, so this falls back to daily bars over a longer
+    window when hourly data comes back empty. Returns ``(series, granularity)``
+    with granularity one of ``"hourly"`` / ``"daily"`` for the caller to label.
+    Cached on disk for a short time — this is meant to feel close to live.
+    """
+    ticker = ticker.strip().upper()
+    if not ticker:
+        return pd.Series(dtype=float), "daily"
+
+    safe = ticker.replace("/", "-").replace("^", "_")
+    path = _PRICE_CACHE / f"{safe}__intraday_{interval}.parquet"
+    if path.exists() and path.stat().st_size > 0:
+        age = datetime.now() - datetime.fromtimestamp(path.stat().st_mtime)
+        if age < _INTRADAY_TTL:
+            try:
+                s = pd.read_parquet(path)["price"]
+                if len(s) >= 5:
+                    return s, "hourly"
+            except Exception:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+
+    try:
+        raw = yf.download(ticker, period=period, interval=interval,
+                          auto_adjust=True, progress=False)
+        close = _extract_close(raw, ticker)
+        s = close[ticker].dropna() if ticker in close.columns else pd.Series(dtype=float)
+        if len(s) >= 5:
+            try:
+                tmp = path.with_suffix(".parquet.tmp")
+                s.to_frame("price").to_parquet(tmp)
+                tmp.replace(path)
+            except Exception:
+                pass
+            return s, "hourly"
+    except Exception:
+        pass
+
+    # Fallback: daily bars over a longer window (reuses fetch_prices' own cache).
+    df = fetch_prices([ticker], lookback_years=0.5)
+    return (df[ticker].dropna(), "daily") if ticker in df.columns else (pd.Series(dtype=float), "daily")
 
 
 def _load_info_cache() -> dict:

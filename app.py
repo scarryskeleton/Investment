@@ -65,6 +65,13 @@ def _latest_prices(tickers):
     return {} if px_.empty else px_.iloc[-1].to_dict()
 
 
+@st.cache_data(show_spinner=False, ttl=60 * 15)
+def _intraday(ticker):
+    from pa import data
+
+    return data.fetch_intraday(ticker)
+
+
 @st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
 def _origins(tickers):
     """{ticker: {country, currency, name, sector, industry}} for a set of tickers."""
@@ -816,6 +823,26 @@ def render_research() -> None:
                "wrong; all return/risk figures are historical.")
 
 
+def _intraday_chart(ticker: str) -> None:
+    """A compact 'how it's been moving' line — hourly bars when Yahoo has
+    them for this ticker, daily bars over a longer window otherwise."""
+    hist, gran = _intraday(ticker)
+    if hist.empty or len(hist) < 2:
+        return
+    unit = "hour" if gran == "hourly" else "day"
+    chg = (float(hist.iloc[-1]) / float(hist.iloc[0]) - 1) * 100
+    up = chg >= 0
+    st.caption(f"📈 {ticker} — last {len(hist)} {unit}s "
+               f"({'+' if up else ''}{chg:.1f}%)"
+               + ("" if gran == "hourly" else " — hourly data unavailable for this one"))
+    fig = px.line(hist)
+    fig.update_traces(line=dict(color="#2e86ab" if up else "#e4572e", width=2))
+    fig.update_layout(height=130, margin=dict(t=0, b=0, l=0, r=0), showlegend=False,
+                      xaxis_title="", yaxis_title="")
+    fig.update_xaxes(showgrid=False)
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+
 def _paper_fee_model() -> paper.FeeModel:
     """Render the 'Trading costs' expander and return the chosen fee model."""
     names = list(paper.PRESETS) + ["Custom…"]
@@ -946,6 +973,81 @@ def _render_paper_overview(state: paper.PaperState, account: str) -> None:
         "currency come from Yahoo Finance and can be rough for funds — an ETF is "
         "tagged where it is *domiciled*, not where it invests."
     )
+
+
+def _account_snapshot(profile: str) -> dict | None:
+    """Cheap performance snapshot of one profile's practice account, for the
+    leaderboard. None if that profile has no practice account yet, or has
+    never traded — nothing to rank."""
+    acc = store.practice_get(profile)
+    if acc is None:
+        return None
+    trades = store.practice_trades(acc["id"])
+    if trades.empty:
+        return None
+
+    stored_ccy = (acc["currency"] or "EUR").upper()
+    held = sorted(set(trades["ticker"]))
+    origins = _origins(tuple(held))
+    ticker_ccy = {t: (origins.get(t, {}).get("currency") or stored_ccy) for t in held}
+
+    tr = trades.copy()
+    tr["ccy"] = [c or ticker_ccy.get(tk, stored_ccy) for c, tk in zip(tr["ccy"], tr["ticker"])]
+    tr = _convert_trades(tr, stored_ccy)
+    latest = {t: v * _fx_spot(ticker_ccy.get(t, stored_ccy), stored_ccy)
+             for t, v in _latest_prices(tuple(held)).items()}
+    state = paper.compute_state(float(acc["starting_cash"]), tr, latest)
+
+    return {
+        "profile": profile,
+        "currency": stored_ccy,
+        "total_value": state.total_value,
+        "pnl_pct": state.total_pnl_pct,
+        "n_trades": state.n_trades,
+        "started": trades["ts"].min(),
+        "locked": store.profile_has_password(profile),
+    }
+
+
+def _render_leaderboard(current_profile: str, acct_ccy: str) -> None:
+    """Every profile's practice account, ranked by return on its own starting
+    cash — visible to everyone, since viewing was never behind a password."""
+    rows = [s for s in (_account_snapshot(p) for p in store.list_profiles()) if s]
+    if len(rows) < 2:
+        return  # a leaderboard of one isn't competitive with anyone
+
+    for r in rows:
+        r["value_here"] = r["total_value"] * _fx_spot(r["currency"], acct_ccy)
+    rows.sort(key=lambda r: r["pnl_pct"], reverse=True)
+
+    st.subheader("🏆 Leaderboard")
+    st.caption("Every practice account, ranked by return since its own starting "
+               "cash — currency-neutral, so it's fair across accounts in "
+               "different currencies. Only its own password can change an "
+               "account; anyone can see where it stands.")
+
+    lb = pd.DataFrame([{
+        "Rank": i + 1,
+        "Profile": ("👉 " if r["profile"] == current_profile else "") + r["profile"]
+                   + (" 🔒" if r["locked"] else ""),
+        "Return": f"{r['pnl_pct']:+.1%}",
+        f"Value ({acct_ccy})": EUR.format(r["value_here"]),
+        "Started": pd.to_datetime(r["started"]).strftime("%d %b %Y"),
+        "Trades": r["n_trades"],
+    } for i, r in enumerate(rows)])
+    st.dataframe(lb, hide_index=True, use_container_width=True)
+
+    bar_df = pd.DataFrame({
+        "profile": [r["profile"] for r in rows],
+        "pnl_pct": [r["pnl_pct"] * 100 for r in rows],
+        "who": ["You" if r["profile"] == current_profile else "Other" for r in rows],
+    }).sort_values("pnl_pct")
+    fig = px.bar(bar_df, x="pnl_pct", y="profile", orientation="h", color="who",
+                color_discrete_map={"You": "#e4572e", "Other": "#4c78a8"},
+                labels={"pnl_pct": "return %", "profile": ""})
+    fig.update_layout(height=max(160, 34 * len(rows) + 60), showlegend=False,
+                      margin=dict(t=10, b=10, l=10, r=30))
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _paper_access(profile: str) -> bool:
@@ -1110,6 +1212,9 @@ def render_paper() -> None:
         c[3].metric("Realized P&L", EUR.format(state.realized_pnl),
                     help="Profit/loss you've locked in by selling.")
 
+    with st.spinner("Tallying every account…"):
+        _render_leaderboard(profile, acct_ccy)
+
     # ---- trade ticket ----
     st.subheader("Place a trade")
     tc = st.columns([2, 1, 1])
@@ -1152,6 +1257,7 @@ def render_paper() -> None:
             + (f" → **{EUR2.m(cash_out)}** {'out' if side == 'Buy' else 'in'}"
                if fee else "")
         )
+        _intraday_chart(tk)
         pos = next((p for p in state.positions if p.ticker == tk), None)
         if st.button(f"{side} {tk}", type="primary", disabled=not can_edit):
             if not can_edit:
@@ -1197,6 +1303,11 @@ def render_paper() -> None:
         d[2].metric("Fees paid", EUR2.format(state.fees_paid),
                     help="Total commission + FX fees across every trade so far.")
         d[3].metric("Trades made", state.n_trades)
+
+        st.subheader("Price movement")
+        _pick = st.selectbox("Holding", [p.ticker for p in state.positions],
+                             key="paper_movement_pick")
+        _intraday_chart(_pick)
 
         _render_paper_overview(state, acct_ccy)
     elif trades.empty:

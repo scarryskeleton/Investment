@@ -484,6 +484,22 @@ def practice_get_or_create(
     return dict(row)
 
 
+def practice_get(profile: str, name: str = "Practice") -> dict | None:
+    """Like :func:`practice_get_or_create` but read-only — returns None
+    instead of creating a fresh (empty) account. Use this to check whether a
+    profile has a practice account at all, e.g. for a leaderboard, without
+    the side effect of creating one just by looking."""
+    with _connect() as conn:
+        pid = _profile_id(conn, profile)
+        if pid is None:
+            return None
+        row = conn.execute(
+            "SELECT * FROM practice_accounts WHERE profile_id = ? AND name = ?",
+            (pid, name),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def practice_record_trade(
     account_id: int, side: str, ticker: str, shares: float, price: float,
     fee: float = 0.0, ccy: str = "",

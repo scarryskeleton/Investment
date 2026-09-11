@@ -62,13 +62,22 @@ latest close**. Everything is derived from the trade log:
   the S&P 500
 - **Trade ticket** — ticker, buy/sell, size in shares or your currency; shows
   the security's country, its native price and currency, and the fee on the
-  trade; validates that you have the cash (incl. fee) / the shares
+  trade; validates that you have the cash (incl. fee) / the shares — plus a
+  **price-movement chart** for the ticker (hourly bars over the last few days
+  when Yahoo has them, daily otherwise) so you can see how it's been moving
+  before you trade
+- **🏆 Leaderboard** — every profile's practice account, ranked by return on
+  its own starting cash (currency-neutral, so it's a fair fight across
+  accounts in different currencies), with value, start date and trade count.
+  Visible to everyone — that's the point of a shared, competitive sandbox
 - **Trading costs** — a switchable cost model (none, a few broker presets, or
   custom): a flat charge and/or commission per trade, plus an FX conversion fee
   on securities not quoted in your account currency. Buy fees go into cost
   basis; sell fees come off the proceeds; both show in the equity curve
 - **Holdings** — shares, average cost, current price, value, unrealized P&L,
   weight, plus business market (sector), country of origin and currency
+- **Price movement** — pick any holding to see its recent hourly (or daily
+  fallback) chart
 - **Portfolio overview** — where your money sits by business market (with the
   tickers in each), by country, and by currency, plus the share of it exposed
   to foreign-currency (FX) risk
@@ -77,7 +86,8 @@ latest close**. Everything is derived from the trade log:
   rate) next to "all-in S&P 500"
 - **Trade log** (with fees, in your currency), undo-last, and a reset button
 
-Saved per profile, so you can trade over weeks and watch how your picks do.
+Saved per profile, so you can trade over weeks and watch how your picks do —
+and see how everyone else's picks are doing too.
 Every price is converted from the security's native quote to your account
 currency at historical exchange rates — the FX fee is on top of that, standing
 in for the real cost of a broker converting currency for you. Spreads,
