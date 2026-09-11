@@ -86,12 +86,13 @@ latest close**. Everything is derived from the trade log:
 - **Equity curve** — your account value day-by-day (a real reconstruction from
   your trades against historical prices, each leg FX-converted at that day's
   rate) next to "all-in S&P 500"
-- **📝 Trade journal** — every trade (with fees, in your currency) in an
-  editable table: add a note to any trade — your thesis, why you bought or
-  sold — visible to everyone, editable only with the profile's password. Pick
-  any trade from **📊 Chart a trade** to see ±45 days of that ticker's own
-  price history with a marker at exactly where you traded, so you can judge
-  the entry or exit with hindsight. Also where undo-last and reset live.
+- **📝 Trade journal** — every trade (with fees, in your currency) in a
+  read-only overview table with a one-line note preview. Pick any trade below
+  it to open a full-width, multi-line editor — room to actually write a
+  thesis, not a spreadsheet cell — plus ±45 days of that ticker's own price
+  history with a marker at exactly where you traded, so you can judge the
+  entry or exit with hindsight. Notes are visible to everyone, editable only
+  with the profile's password. Also where undo-last and reset live.
 
 Saved per profile, so you can trade over weeks and watch how your picks do —
 and see how everyone else's picks are doing too. Every price is converted

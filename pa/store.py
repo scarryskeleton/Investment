@@ -557,7 +557,7 @@ def practice_set_trade_note(trade_id: int, note: str) -> None:
     with _connect() as conn:
         conn.execute(
             "UPDATE practice_trades SET note = ? WHERE id = ?",
-            (str(note).strip()[:500], int(trade_id)),
+            (str(note).strip()[:4000], int(trade_id)),
         )
 
 

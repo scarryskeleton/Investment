@@ -1434,38 +1434,17 @@ def render_paper() -> None:
         log["Shares"] = log["shares"].round(4)
         log[f"Price ({acct_ccy})"] = log["price"].round(2)
         log[f"Fee ({acct_ccy})"] = log["fee"].round(2)
-        log["Note"] = log["note"].fillna("")
+        log["Note"] = log["note"].fillna("").apply(
+            lambda n: (n[:57] + "…") if len(n) > 60 else n)
         cols = ["Date", "Side", "Ticker", "Shares", f"Price ({acct_ccy})",
                 f"Fee ({acct_ccy})", "Note"]
         view = log[["id", *cols]].iloc[::-1].reset_index(drop=True)
-
-        if can_edit:
-            edited = st.data_editor(
-                view, hide_index=True, use_container_width=True, column_order=cols,
-                disabled=[c for c in cols if c != "Note"],
-                column_config={"Note": st.column_config.TextColumn(
-                    "Note", help="Why you made this trade — visible to everyone, "
-                                 "editable only by you.", max_chars=500)},
-                key=f"journal_editor_{aid}",
-            )
-            orig_notes = dict(zip(view["id"], view["Note"]))
-            changed = False
-            for _, r in edited.iterrows():
-                new_note = (r["Note"] or "").strip()
-                if new_note != orig_notes.get(int(r["id"]), ""):
-                    store.practice_set_trade_note(int(r["id"]), new_note)
-                    changed = True
-            if changed:
-                st.toast("Note saved.", icon="📝")
-                st.rerun()
-        else:
-            st.dataframe(view[cols], hide_index=True, use_container_width=True)
-            st.caption("🔒 Locked — enter the password in the sidebar to edit notes.")
-
+        st.dataframe(view[cols], hide_index=True, use_container_width=True)
         st.caption("Prices shown converted to " + acct_ccy
-                   + " at each trade date's exchange rate.")
+                   + " at each trade date's exchange rate. Notes are truncated "
+                     "above — write and read the full thing below.")
 
-        st.markdown("**📊 Chart a trade**")
+        st.markdown("**📝 Note & 📊 chart for one trade**")
         _labels = {
             int(r["id"]): f"{r['side'].upper()} {r['ticker']} — {r['shares']:.4g} sh "
                           f"@ {r['price']:,.2f} {(r['ccy'] or acct_ccy)} "
@@ -1476,6 +1455,29 @@ def render_paper() -> None:
                             key="paper_chart_trade")
         if _tid is not None:
             _row = trades_raw.loc[trades_raw["id"] == _tid].iloc[0]
+            note_key = f"note_edit_{aid}_{_tid}"
+            db_note = _row["note"] or ""
+            if note_key not in st.session_state:
+                st.session_state[note_key] = db_note
+
+            st.text_area(
+                "Your thesis, the catalyst, what would change your mind — as much "
+                "as you want",
+                key=note_key, height=180, max_chars=4000, disabled=not can_edit,
+                placeholder="Why this trade?",
+            )
+            dirty = st.session_state[note_key].strip() != db_note.strip()
+            bc = st.columns([1, 5])
+            if bc[0].button("💾 Save note", disabled=not can_edit or not dirty,
+                            key=f"save_note_{_tid}"):
+                store.practice_set_trade_note(_tid, st.session_state[note_key])
+                st.toast("Note saved.", icon="📝")
+                st.rerun()
+            if not can_edit:
+                bc[1].caption("🔒 Locked — enter the password in the sidebar to edit.")
+            elif dirty:
+                bc[1].caption("Unsaved changes.")
+
             _trade_history_chart(_row["ticker"], _row["ts"], float(_row["price"]),
                                  _row["side"], _row["ccy"] or acct_ccy)
 
