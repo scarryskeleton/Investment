@@ -1112,6 +1112,27 @@ def _render_leaderboard(current_profile: str, acct_ccy: str) -> None:
         st.plotly_chart(fig, use_container_width=True)
 
 
+def _paper_try_unlock(profile: str, key: str, pw_key: str) -> None:
+    """Check whatever's currently sitting in the password field and update
+    the unlock state. Used both as the field's ``on_change`` (so Enter
+    submits it) and called directly from the Unlock button.
+
+    Deliberately *not* an ``st.form`` — forms in the sidebar don't reliably
+    submit on Enter (confirmed: typing the right password and pressing
+    Enter did nothing until you clicked the button), which is exactly what
+    read as "buggy". A plain widget's own ``on_change`` fires on Enter *or*
+    blur, so both work now.
+    """
+    pw = st.session_state.get(pw_key, "")
+    st.session_state[f"{key}::err"] = False
+    if pw:
+        if store.profile_check_password(profile, pw):
+            st.session_state[key] = True
+        else:
+            st.session_state[f"{key}::err"] = True
+    st.session_state[pw_key] = ""  # clear the field either way
+
+
 def _paper_access(profile: str) -> bool:
     """Sidebar password gate for one practice profile's write actions.
 
@@ -1124,17 +1145,19 @@ def _paper_access(profile: str) -> bool:
     has_pw = store.profile_has_password(profile)
 
     if has_pw and not st.session_state.get(key):
-        with sb.form(f"unlock_form_{profile}", clear_on_submit=True):
-            st.caption(f"🔒 **{profile}** is password-protected. Anyone can "
-                       "view it — you need the password to trade, undo or reset.")
-            pw = st.text_input("Password", type="password", label_visibility="collapsed",
-                               placeholder="Password to make changes")
-            if st.form_submit_button("Unlock", use_container_width=True):
-                if store.profile_check_password(profile, pw):
-                    st.session_state[key] = True
-                    st.rerun()
-                else:
-                    st.error("Wrong password.")
+        pw_key = f"pwval::{profile}"
+        sb.caption(f"🔒 **{profile}** is password-protected. Anyone can "
+                   "view it — you need the password to trade, undo or reset.")
+        sb.text_input(
+            "Password", type="password", label_visibility="collapsed",
+            placeholder="Password to make changes, then press Enter", key=pw_key,
+            on_change=_paper_try_unlock, args=(profile, key, pw_key),
+        )
+        if sb.button("Unlock", use_container_width=True):
+            _paper_try_unlock(profile, key, pw_key)
+            st.rerun()
+        if st.session_state.get(f"{key}::err"):
+            sb.error("Wrong password.")
         return bool(st.session_state.get(key))
 
     if has_pw:
