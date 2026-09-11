@@ -319,7 +319,12 @@ python cli.py --holdings sample_portfolio.csv --watchlist "COST,JNJ,XOM,BRK-B" -
 
 | File | Purpose |
 | --- | --- |
-| `app.py` | Streamlit dashboard |
+| `app.py` | Entry point — page config, sidebar (mode switch, currency), and the 📈 Analyze mode (not yet split out) |
+| `ui/common.py` | Shared formatting, currency state, and cached data helpers used by 2+ modes |
+| `ui/explore.py` | 🌱 Explore from cash |
+| `ui/research.py` | 🔎 Research a stock or bond |
+| `ui/practice.py` | 🎮 Practice portfolio — trading, leaderboard, trade journal |
+| `tests/` | Offline unit tests (`python -m unittest discover -s tests`) for the pure-logic modules — `paper.py`, `fx.py`, `portfolio.py`, `store.py`. No network calls, runs in well under a second |
 | `cli.py` | Terminal version of the analysis |
 | `pa/explore.py` | 'Explore from cash' — risk-slider mix + contribution simulator |
 | `pa/neural.py` | Tiny NumPy mixture-density network — the experimental path generator |
