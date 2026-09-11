@@ -219,7 +219,8 @@ this machine, in `userdata/portfolios.db`, which is git-ignored:
 - The active grid is what **Analyze** runs on.
 
 Delete a profile from the `⋯` button next to its name (removes all its
-portfolios). To wipe everything, delete `userdata/portfolios.db`.
+portfolios). To wipe everything, delete `userdata/portfolios.db` (or, on
+Turso, drop the tables — see below).
 
 **Practice-portfolio passwords.** Anyone can view any profile's practice
 account (pick it from the **Profile** dropdown in 🎮 Practice mode) — there's
@@ -252,16 +253,36 @@ See **[Quick start](#quick-start)** above for the run commands. Once it's open:
 
 Caveats to tell them:
 
-- **Data is not permanent.** The SQLite file (`userdata/portfolios.db` — profiles,
-  saved portfolios, practice accounts) lives on the app's temporary disk and is
-  wiped whenever the app redeploys or wakes from sleep. Fine for "try it out",
-  not for tracking a practice portfolio over months. For durable storage, move
-  `pa/store.py` onto a hosted database (e.g. a free Supabase Postgres).
 - **Viewing is always open.** Anyone with the link can open any profile by
   name. An optional per-profile password only gates *changes* (trade, undo,
   reset) in 🎮 Practice mode — see [Profiles & saved portfolios](#profiles--saved-portfolios).
 - The app **sleeps after inactivity**; the first visit then takes ~30s to wake.
 - Yahoo Finance occasionally rate-limits shared cloud IPs — a reload usually fixes it.
+
+### Durable storage (Turso)
+
+By default `pa/store.py` uses a local SQLite file, which Streamlit Cloud wipes
+on every redeploy and when the app wakes from sleep — fine solo, not once
+other people's practice-trading history is riding on it. Point it at a free
+[Turso](https://turso.tech) database instead and it survives both:
+
+1. Sign up at turso.tech (GitHub login, no card) and create a database.
+2. From its dashboard, grab the **Database URL** (`libsql://...`) and generate
+   an **Auth Token**.
+3. On Streamlit Cloud: your app → **⋮ → Settings → Secrets** →
+   ```toml
+   TURSO_DATABASE_URL = "libsql://your-db-name.turso.io"
+   TURSO_AUTH_TOKEN = "your-token-here"
+   ```
+   Reboot the app. `pa/store.py` detects these automatically and switches
+   backends — no code change needed. Without them (e.g. running locally) it
+   keeps using the local SQLite file.
+4. For local development against the same Turso database instead of a local
+   file, put the same two keys in `.streamlit/secrets.toml` (already
+   git-ignored) or export them as environment variables.
+
+Turso *is* SQLite (the same engine, hosted), so the schema and every query in
+`pa/store.py` are unchanged — only the connection differs.
 
 Other hosts that work the same way: **Hugging Face Spaces** (Streamlit SDK),
 **Render**, **Railway**. For a quick live demo from your own machine instead,
@@ -292,7 +313,7 @@ python cli.py --holdings sample_portfolio.csv --watchlist "COST,JNJ,XOM,BRK-B" -
 | `pa/research.py` | Research mode — business profile, key stats, vs-benchmark stats, plain-language insights |
 | `pa/paper.py` | Practice-portfolio simulator — replay trade log → holdings, P&L, equity curve |
 | `pa/education.py` | Glossary, method notes, plain-language result interpretation |
-| `pa/store.py` | SQLite persistence for profiles + saved portfolios |
+| `pa/store.py` | Persistence for profiles, saved portfolios, practice accounts — local SQLite, or Turso when configured |
 | `pa/data.py` | yfinance price + fundamentals access, disk-cached |
 | `pa/fx.py` | Currency conversion — spot and historical FX rates via Yahoo, reused for the account-currency setting everywhere |
 | `pa/universe.py` | Curated ETF list and S&P 500 constituents |

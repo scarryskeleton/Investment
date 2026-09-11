@@ -1,14 +1,25 @@
-"""Local persistence for user profiles and their saved portfolios.
+"""Persistence for user profiles, saved portfolios and practice accounts.
 
-A single SQLite file under ``userdata/`` (git-ignored). No passwords - profiles
-are just named namespaces, appropriate for a dashboard that runs on your own
-machine. Every call opens its own short-lived connection so it is safe to use
-from Streamlit's script threads.
+Two backends, chosen automatically by :func:`_connect`:
+
+- **Turso** (a hosted, SQLite-compatible database) when ``TURSO_DATABASE_URL``
+  and ``TURSO_AUTH_TOKEN`` are set (env vars, or Streamlit secrets) — durable
+  storage that survives a redeploy or the app waking from sleep, so a shared
+  deployment can be trusted with everyone's practice-trading history.
+- A local SQLite file under ``userdata/`` (git-ignored) otherwise — no setup
+  needed for local development.
+
+Both speak the same SQL (Turso *is* SQLite under the hood), so almost every
+function below is backend-agnostic; only :func:`_connect` and the two small
+wrapper classes around the Turso client know the difference. Every call opens
+its own short-lived connection so it is safe to use from Streamlit's script
+threads.
 """
 
 from __future__ import annotations
 
 import hashlib
+import os
 import secrets as _secrets
 import sqlite3
 from datetime import datetime, timezone
@@ -68,7 +79,7 @@ CREATE TABLE IF NOT EXISTS settings (
 """
 
 
-def _migrate(conn: sqlite3.Connection) -> None:
+def _migrate(conn) -> None:
     """Additive column adds for databases created by an older version."""
     tcols = {r["name"] for r in conn.execute("PRAGMA table_info(practice_trades)")}
     if "fee" not in tcols:
@@ -91,7 +102,85 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _connect() -> sqlite3.Connection:
+def _turso_creds() -> tuple[str, str] | None:
+    """(database_url, auth_token) from the environment or Streamlit secrets,
+    or None if Turso isn't configured — in which case we fall back to local
+    SQLite."""
+    url = os.environ.get("TURSO_DATABASE_URL")
+    token = os.environ.get("TURSO_AUTH_TOKEN")
+    if not (url and token):
+        try:
+            import streamlit as st
+
+            url = url or st.secrets.get("TURSO_DATABASE_URL")
+            token = token or st.secrets.get("TURSO_AUTH_TOKEN")
+        except Exception:
+            pass
+    return (url, token) if (url and token) else None
+
+
+class _TursoCursor:
+    """Makes a libsql cursor look like a sqlite3 one: rows come back as plain
+    dicts (so both ``row["col"]`` and ``dict(row)`` work, matching how the
+    rest of this module already uses ``sqlite3.Row``)."""
+
+    def __init__(self, raw) -> None:
+        self._raw = raw
+
+    def _cols(self) -> list[str]:
+        return [d[0] for d in (self._raw.description or [])]
+
+    def fetchone(self) -> dict | None:
+        row = self._raw.fetchone()
+        return dict(zip(self._cols(), row)) if row is not None else None
+
+    def fetchall(self) -> list[dict]:
+        cols = self._cols()
+        return [dict(zip(cols, r)) for r in self._raw.fetchall()]
+
+    def __iter__(self):
+        """sqlite3 cursors are directly iterable (``for row in conn.execute(...)``);
+        a couple of call sites in this module rely on that."""
+        return iter(self.fetchall())
+
+    @property
+    def lastrowid(self):
+        return self._raw.lastrowid
+
+
+class _TursoConn:
+    """Thin sqlite3-compatible shim over ``libsql_experimental`` so every
+    other function in this module can stay backend-agnostic."""
+
+    def __init__(self, raw) -> None:
+        self._raw = raw
+
+    def execute(self, sql: str, params: tuple = ()) -> _TursoCursor:
+        return _TursoCursor(self._raw.execute(sql, params))
+
+    def executescript(self, sql: str) -> None:
+        self._raw.executescript(sql)
+
+    def __enter__(self) -> "_TursoConn":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        (self._raw.rollback() if exc_type else self._raw.commit())
+        return False
+
+
+def _connect():
+    creds = _turso_creds()
+    if creds:
+        import libsql_experimental as libsql
+
+        raw = libsql.connect(creds[0], auth_token=creds[1])
+        try:
+            raw.execute("PRAGMA foreign_keys = ON")
+        except Exception:
+            pass  # not critical - the schema's ON DELETE CASCADE is the backstop
+        return _TursoConn(raw)
+
     DB_PATH.parent.mkdir(exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -190,7 +279,7 @@ def profile_set_password(name: str, password: str) -> None:
         )
 
 
-def _profile_id(conn: sqlite3.Connection, name: str) -> int | None:
+def _profile_id(conn, name: str) -> int | None:
     row = conn.execute("SELECT id FROM profiles WHERE name = ?", (name.strip(),)).fetchone()
     return row["id"] if row else None
 
