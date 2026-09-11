@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS practice_trades (
     shares     REAL NOT NULL,
     price      REAL NOT NULL,
     fee        REAL NOT NULL DEFAULT 0,
-    ccy        TEXT NOT NULL DEFAULT ''
+    ccy        TEXT NOT NULL DEFAULT '',
+    note       TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
@@ -87,6 +88,8 @@ def _migrate(conn) -> None:
         conn.execute("ALTER TABLE practice_trades ADD COLUMN fee REAL NOT NULL DEFAULT 0")
     if "ccy" not in tcols:
         conn.execute("ALTER TABLE practice_trades ADD COLUMN ccy TEXT NOT NULL DEFAULT ''")
+    if "note" not in tcols:
+        conn.execute("ALTER TABLE practice_trades ADD COLUMN note TEXT NOT NULL DEFAULT ''")
     acols = {r["name"] for r in conn.execute("PRAGMA table_info(practice_accounts)")}
     if "currency" not in acols:
         conn.execute(
@@ -537,16 +540,25 @@ def practice_set_starting_cash(account_id: int, starting_cash: float) -> None:
 def practice_trades(account_id: int) -> pd.DataFrame:
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT ts, side, ticker, shares, price, fee, ccy FROM practice_trades "
-            "WHERE account_id = ? ORDER BY ts, id",
+            "SELECT id, ts, side, ticker, shares, price, fee, ccy, note "
+            "FROM practice_trades WHERE account_id = ? ORDER BY ts, id",
             (account_id,),
         ).fetchall()
     df = pd.DataFrame([dict(r) for r in rows],
-                      columns=["ts", "side", "ticker", "shares", "price", "fee", "ccy"])
+                      columns=["id", "ts", "side", "ticker", "shares", "price",
+                              "fee", "ccy", "note"])
     if not df.empty:
         # stored as UTC ISO; drop the tz so it compares cleanly with naive price indexes
         df["ts"] = pd.to_datetime(df["ts"], utc=True).dt.tz_localize(None)
     return df
+
+
+def practice_set_trade_note(trade_id: int, note: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE practice_trades SET note = ? WHERE id = ?",
+            (str(note).strip()[:500], int(trade_id)),
+        )
 
 
 def practice_reset(account_id: int, starting_cash: float | None = None) -> None:

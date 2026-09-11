@@ -66,10 +66,12 @@ latest close**. Everything is derived from the trade log:
   **price-movement chart** for the ticker (hourly bars over the last few days
   when Yahoo has them, daily otherwise) so you can see how it's been moving
   before you trade
-- **🏆 Leaderboard** — every profile's practice account, ranked by return on
-  its own starting cash (currency-neutral, so it's a fair fight across
-  accounts in different currencies), with value, start date and trade count.
-  Visible to everyone — that's the point of a shared, competitive sandbox
+- **🏆 Leaderboard** — always on screen, right under your own numbers. Every
+  profile's practice account, ranked by return on its own starting cash
+  (currency-neutral, so it's a fair fight across accounts in different
+  currencies), with value, start date and trade count. Visible to everyone —
+  that's the point of a shared, competitive sandbox; it just says so plainly
+  until a second person has traded
 - **Trading costs** — a switchable cost model (none, a few broker presets, or
   custom): a flat charge and/or commission per trade, plus an FX conversion fee
   on securities not quoted in your account currency. Buy fees go into cost
@@ -84,15 +86,19 @@ latest close**. Everything is derived from the trade log:
 - **Equity curve** — your account value day-by-day (a real reconstruction from
   your trades against historical prices, each leg FX-converted at that day's
   rate) next to "all-in S&P 500"
-- **Trade log** (with fees, in your currency), undo-last, and a reset button
+- **📝 Trade journal** — every trade (with fees, in your currency) in an
+  editable table: add a note to any trade — your thesis, why you bought or
+  sold — visible to everyone, editable only with the profile's password. Pick
+  any trade from **📊 Chart a trade** to see ±45 days of that ticker's own
+  price history with a marker at exactly where you traded, so you can judge
+  the entry or exit with hindsight. Also where undo-last and reset live.
 
 Saved per profile, so you can trade over weeks and watch how your picks do —
-and see how everyone else's picks are doing too.
-Every price is converted from the security's native quote to your account
-currency at historical exchange rates — the FX fee is on top of that, standing
-in for the real cost of a broker converting currency for you. Spreads,
-slippage, dividends and taxes are still not modelled — a learning sandbox, not
-a broker.
+and see how everyone else's picks are doing too. Every price is converted
+from the security's native quote to your account currency at historical
+exchange rates — the FX fee is on top of that, standing in for the real cost
+of a broker converting currency for you. Spreads, slippage, dividends and
+taxes are still not modelled — a learning sandbox, not a broker.
 
 ### 🔎 Research a stock or bond (search or browse, focus one)
 

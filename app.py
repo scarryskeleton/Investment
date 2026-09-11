@@ -843,6 +843,47 @@ def _intraday_chart(ticker: str) -> None:
     st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
+@st.cache_data(show_spinner=False, ttl=60 * 60 * 6)
+def _trade_context_prices(ticker, lookback_years):
+    from pa import data
+
+    return data.fetch_prices([ticker], lookback_years=lookback_years)
+
+
+def _trade_history_chart(ticker: str, trade_date, trade_price: float,
+                         side: str, ccy: str) -> None:
+    """Daily price history around one specific past trade, with a marker at
+    the date/price it executed — 'was this a good entry (or exit)?' at a
+    glance. Uses the security's own native currency, matching the price
+    history itself, so there's no FX distortion to second-guess."""
+    trade_date = pd.Timestamp(trade_date)
+    pad = pd.Timedelta(days=45)
+    days_needed = max((pd.Timestamp.now() - trade_date).days, 0) + 45 + 5
+    lookback_years = max(0.3, days_needed / 365.25)
+
+    hist = _trade_context_prices(ticker, round(lookback_years, 2))
+    if hist.empty or ticker not in hist.columns:
+        st.caption(f"No historical price data available for {ticker}.")
+        return
+    s = hist[ticker]
+    window = s[(s.index >= trade_date - pad) & (s.index <= trade_date + pad)]
+    if window.empty:
+        window = s.tail(90)
+
+    fig = px.line(window)
+    fig.update_traces(line=dict(color="#9aa0a6", width=1.5), showlegend=False)
+    fig.add_scatter(
+        x=[trade_date], y=[trade_price], mode="markers", showlegend=False,
+        marker=dict(size=13, color="#2e86ab" if side == "buy" else "#e4572e",
+                   symbol="triangle-up" if side == "buy" else "triangle-down"),
+    )
+    fig.update_layout(height=260, margin=dict(t=10, b=10), xaxis_title="",
+                      yaxis_title=f"price ({ccy})")
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(f"{side.title()} marker at {trade_date:%d %b %Y}, "
+               f"{trade_price:,.2f} {ccy} — ±45 days of {ticker}'s own price history.")
+
+
 def _paper_fee_model() -> paper.FeeModel:
     """Render the 'Trading costs' expander and return the chosen fee model."""
     names = list(paper.PRESETS) + ["Custom…"]
@@ -1011,20 +1052,40 @@ def _account_snapshot(profile: str) -> dict | None:
 
 def _render_leaderboard(current_profile: str, acct_ccy: str) -> None:
     """Every profile's practice account, ranked by return on its own starting
-    cash — visible to everyone, since viewing was never behind a password."""
-    rows = [s for s in (_account_snapshot(p) for p in store.list_profiles()) if s]
-    if len(rows) < 2:
-        return  # a leaderboard of one isn't competitive with anyone
+    cash — visible to everyone, since viewing was never behind a password.
+
+    Always renders (even with zero or one active trader) so it's a permanent,
+    predictable fixture rather than something that appears once a threshold
+    is met and otherwise looks like it's missing.
+    """
+    st.subheader("🏆 Leaderboard")
+    rows = []
+    for p in store.list_profiles():
+        try:
+            snap = _account_snapshot(p)
+        except Exception:
+            continue  # one account's bad data shouldn't blank the board for everyone
+        if snap:
+            rows.append(snap)
+
+    if not rows:
+        st.caption("No one's placed a practice trade yet — be the first, and this "
+                   "fills in.")
+        return
 
     for r in rows:
         r["value_here"] = r["total_value"] * _fx_spot(r["currency"], acct_ccy)
     rows.sort(key=lambda r: r["pnl_pct"], reverse=True)
 
-    st.subheader("🏆 Leaderboard")
-    st.caption("Every practice account, ranked by return since its own starting "
-               "cash — currency-neutral, so it's fair across accounts in "
-               "different currencies. Only its own password can change an "
-               "account; anyone can see where it stands.")
+    st.caption(
+        ("Every practice account, ranked by return since its own starting "
+         "cash — currency-neutral, so it's fair across accounts in different "
+         "currencies. Only its own password can change an account; anyone "
+         "can see where it stands.")
+        if len(rows) > 1 else
+        "You're the only one who's traded so far — share the link and this "
+        "turns into a real leaderboard."
+    )
 
     lb = pd.DataFrame([{
         "Rank": i + 1,
@@ -1037,17 +1098,18 @@ def _render_leaderboard(current_profile: str, acct_ccy: str) -> None:
     } for i, r in enumerate(rows)])
     st.dataframe(lb, hide_index=True, use_container_width=True)
 
-    bar_df = pd.DataFrame({
-        "profile": [r["profile"] for r in rows],
-        "pnl_pct": [r["pnl_pct"] * 100 for r in rows],
-        "who": ["You" if r["profile"] == current_profile else "Other" for r in rows],
-    }).sort_values("pnl_pct")
-    fig = px.bar(bar_df, x="pnl_pct", y="profile", orientation="h", color="who",
-                color_discrete_map={"You": "#e4572e", "Other": "#4c78a8"},
-                labels={"pnl_pct": "return %", "profile": ""})
-    fig.update_layout(height=max(160, 34 * len(rows) + 60), showlegend=False,
-                      margin=dict(t=10, b=10, l=10, r=30))
-    st.plotly_chart(fig, use_container_width=True)
+    if len(rows) > 1:
+        bar_df = pd.DataFrame({
+            "profile": [r["profile"] for r in rows],
+            "pnl_pct": [r["pnl_pct"] * 100 for r in rows],
+            "who": ["You" if r["profile"] == current_profile else "Other" for r in rows],
+        }).sort_values("pnl_pct")
+        fig = px.bar(bar_df, x="pnl_pct", y="profile", orientation="h", color="who",
+                    color_discrete_map={"You": "#e4572e", "Other": "#4c78a8"},
+                    labels={"pnl_pct": "return %", "profile": ""})
+        fig.update_layout(height=max(160, 34 * len(rows) + 60), showlegend=False,
+                          margin=dict(t=10, b=10, l=10, r=30))
+        st.plotly_chart(fig, use_container_width=True)
 
 
 def _paper_access(profile: str) -> bool:
@@ -1335,25 +1397,71 @@ def render_paper() -> None:
                 "Beating the market consistently is *hard* — that's the lesson."
             )
 
-    # ---- log & reset ----
+    # ---- trade journal ----
     if not trades_raw.empty:
-        with st.expander("Trade log"):
-            log = trades.copy()
-            log["ts"] = log["ts"].dt.strftime("%Y-%m-%d %H:%M")
-            log = log.rename(columns={"price": f"price ({acct_ccy})",
-                                      "fee": f"fee ({acct_ccy})", "ccy": "native"})
-            log[f"value ({acct_ccy})"] = (log["shares"] * log[f"price ({acct_ccy})"]).round(0)
-            log[f"price ({acct_ccy})"] = log[f"price ({acct_ccy})"].round(2)
-            log[f"fee ({acct_ccy})"] = log[f"fee ({acct_ccy})"].round(2)
-            st.dataframe(log.iloc[::-1], hide_index=True, use_container_width=True)
-            st.caption("Prices shown converted to " + acct_ccy
-                       + " at each trade date's exchange rate.")
-            if st.button("Undo last trade", disabled=not can_edit):
-                if can_edit:
-                    store.practice_undo_last(aid)
-                    st.rerun()
-            if not can_edit:
-                st.caption("🔒 Locked — enter the password in the sidebar to undo.")
+        st.subheader("📝 Trade journal")
+        st.caption("Every trade, with room for the *why* — jot down your thesis so "
+                   "future-you can check it against what actually happened. Anyone "
+                   "can read these notes; only this profile's password can edit them.")
+
+        log = trades.copy()
+        log["Date"] = log["ts"].dt.strftime("%Y-%m-%d %H:%M")
+        log["Side"] = log["side"].str.upper()
+        log["Ticker"] = log["ticker"]
+        log["Shares"] = log["shares"].round(4)
+        log[f"Price ({acct_ccy})"] = log["price"].round(2)
+        log[f"Fee ({acct_ccy})"] = log["fee"].round(2)
+        log["Note"] = log["note"].fillna("")
+        cols = ["Date", "Side", "Ticker", "Shares", f"Price ({acct_ccy})",
+                f"Fee ({acct_ccy})", "Note"]
+        view = log[["id", *cols]].iloc[::-1].reset_index(drop=True)
+
+        if can_edit:
+            edited = st.data_editor(
+                view, hide_index=True, use_container_width=True, column_order=cols,
+                disabled=[c for c in cols if c != "Note"],
+                column_config={"Note": st.column_config.TextColumn(
+                    "Note", help="Why you made this trade — visible to everyone, "
+                                 "editable only by you.", max_chars=500)},
+                key=f"journal_editor_{aid}",
+            )
+            orig_notes = dict(zip(view["id"], view["Note"]))
+            changed = False
+            for _, r in edited.iterrows():
+                new_note = (r["Note"] or "").strip()
+                if new_note != orig_notes.get(int(r["id"]), ""):
+                    store.practice_set_trade_note(int(r["id"]), new_note)
+                    changed = True
+            if changed:
+                st.toast("Note saved.", icon="📝")
+                st.rerun()
+        else:
+            st.dataframe(view[cols], hide_index=True, use_container_width=True)
+            st.caption("🔒 Locked — enter the password in the sidebar to edit notes.")
+
+        st.caption("Prices shown converted to " + acct_ccy
+                   + " at each trade date's exchange rate.")
+
+        st.markdown("**📊 Chart a trade**")
+        _labels = {
+            int(r["id"]): f"{r['side'].upper()} {r['ticker']} — {r['shares']:.4g} sh "
+                          f"@ {r['price']:,.2f} {(r['ccy'] or acct_ccy)} "
+                          f"({r['ts']:%d %b %Y})"
+            for _, r in trades_raw.iloc[::-1].iterrows()
+        }
+        _tid = st.selectbox("Trade", list(_labels), format_func=lambda i: _labels[i],
+                            key="paper_chart_trade")
+        if _tid is not None:
+            _row = trades_raw.loc[trades_raw["id"] == _tid].iloc[0]
+            _trade_history_chart(_row["ticker"], _row["ts"], float(_row["price"]),
+                                 _row["side"], _row["ccy"] or acct_ccy)
+
+        if st.button("Undo last trade", disabled=not can_edit):
+            if can_edit:
+                store.practice_undo_last(aid)
+                st.rerun()
+        if not can_edit:
+            st.caption("🔒 Locked — enter the password in the sidebar to undo.")
 
     with st.expander("Start over"):
         newcash = st.number_input(f"Fresh starting cash ({acct_ccy})", 100.0, 1e8,
