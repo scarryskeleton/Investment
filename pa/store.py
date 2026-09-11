@@ -22,6 +22,7 @@ import hashlib
 import os
 import secrets as _secrets
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -150,10 +151,16 @@ class _TursoCursor:
 
 class _TursoConn:
     """Thin sqlite3-compatible shim over ``libsql_experimental`` so every
-    other function in this module can stay backend-agnostic."""
+    other function in this module can stay backend-agnostic.
 
-    def __init__(self, raw) -> None:
+    Wraps the one process-wide connection (see ``_turso_singleton`` below)
+    rather than opening its own — ``__enter__``/``__exit__`` just serialize
+    access to it with a lock, they don't connect or disconnect.
+    """
+
+    def __init__(self, raw, lock: "threading.Lock") -> None:
         self._raw = raw
+        self._lock = lock
 
     def execute(self, sql: str, params: tuple = ()) -> _TursoCursor:
         return _TursoCursor(self._raw.execute(sql, params))
@@ -162,24 +169,42 @@ class _TursoConn:
         self._raw.executescript(sql)
 
     def __enter__(self) -> "_TursoConn":
+        self._lock.acquire()
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
-        (self._raw.rollback() if exc_type else self._raw.commit())
+        try:
+            (self._raw.rollback() if exc_type else self._raw.commit())
+        finally:
+            self._lock.release()
         return False
+
+
+_turso_singleton = None  # the one long-lived libsql connection for this process
+_turso_lock = threading.Lock()
+
+
+def _turso_raw(url: str, token: str):
+    """The shared Turso connection, opened once per process and reused for
+    every query after — opening a fresh network connection per call (the
+    original approach) made every page interaction noticeably slow."""
+    global _turso_singleton
+    with _turso_lock:
+        if _turso_singleton is None:
+            import libsql_experimental as libsql
+
+            _turso_singleton = libsql.connect(url, auth_token=token)
+            try:
+                _turso_singleton.execute("PRAGMA foreign_keys = ON")
+            except Exception:
+                pass  # not critical - the schema's ON DELETE CASCADE is the backstop
+        return _turso_singleton
 
 
 def _connect():
     creds = _turso_creds()
     if creds:
-        import libsql_experimental as libsql
-
-        raw = libsql.connect(creds[0], auth_token=creds[1])
-        try:
-            raw.execute("PRAGMA foreign_keys = ON")
-        except Exception:
-            pass  # not critical - the schema's ON DELETE CASCADE is the backstop
-        return _TursoConn(raw)
+        return _TursoConn(_turso_raw(*creds), _turso_lock)
 
     DB_PATH.parent.mkdir(exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
