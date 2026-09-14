@@ -81,25 +81,32 @@ CREATE TABLE IF NOT EXISTS settings (
 """
 
 
+def _add_column(conn, table: str, column: str, coldef: str) -> None:
+    """Add one column, tolerating "it's already there"."""
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coldef}")
+    except Exception:
+        pass  # already exists — SQLite/libSQL both reject a duplicate column,
+              # which is all the signal we need and is far more portable than
+              # reading it back with PRAGMA table_info() first (see below)
+
+
 def _migrate(conn) -> None:
-    """Additive column adds for databases created by an older version."""
-    tcols = {r["name"] for r in conn.execute("PRAGMA table_info(practice_trades)")}
-    if "fee" not in tcols:
-        conn.execute("ALTER TABLE practice_trades ADD COLUMN fee REAL NOT NULL DEFAULT 0")
-    if "ccy" not in tcols:
-        conn.execute("ALTER TABLE practice_trades ADD COLUMN ccy TEXT NOT NULL DEFAULT ''")
-    if "note" not in tcols:
-        conn.execute("ALTER TABLE practice_trades ADD COLUMN note TEXT NOT NULL DEFAULT ''")
-    acols = {r["name"] for r in conn.execute("PRAGMA table_info(practice_accounts)")}
-    if "currency" not in acols:
-        conn.execute(
-            "ALTER TABLE practice_accounts ADD COLUMN currency TEXT NOT NULL DEFAULT 'EUR'"
-        )
-    pcols = {r["name"] for r in conn.execute("PRAGMA table_info(profiles)")}
-    if "password_hash" not in pcols:
-        conn.execute("ALTER TABLE profiles ADD COLUMN password_hash TEXT")
-    if "password_salt" not in pcols:
-        conn.execute("ALTER TABLE profiles ADD COLUMN password_salt TEXT")
+    """Additive column adds for databases created by an older version.
+
+    Deliberately doesn't use ``PRAGMA table_info(...)`` to check what's
+    there first — that's what crashed the very first deploy against Turso
+    (PRAGMA introspection isn't reliably supported over its remote
+    connection, even though plain DDL/DML is). Trying the ALTER and
+    swallowing the "duplicate column" error works identically on local
+    SQLite and on Turso, so there's one code path instead of two.
+    """
+    _add_column(conn, "practice_trades", "fee", "REAL NOT NULL DEFAULT 0")
+    _add_column(conn, "practice_trades", "ccy", "TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "practice_trades", "note", "TEXT NOT NULL DEFAULT ''")
+    _add_column(conn, "practice_accounts", "currency", "TEXT NOT NULL DEFAULT 'EUR'")
+    _add_column(conn, "profiles", "password_hash", "TEXT")
+    _add_column(conn, "profiles", "password_salt", "TEXT")
 
 
 def _now() -> str:

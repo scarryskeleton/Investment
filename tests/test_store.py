@@ -184,6 +184,40 @@ class MigrationTests(StoreTestCase):
         store.get_or_create_profile("Alice")
         self.assertIn("Alice", store.list_profiles())
 
+    def test_migrate_adds_a_genuinely_missing_column(self):
+        """Regression test for the first real deploy: _migrate crashed against
+        Turso because it read PRAGMA table_info() first to decide what to add.
+        PRAGMA introspection isn't reliable over Turso's remote connection —
+        plain DDL is — so _migrate now just tries the ALTER and swallows a
+        "duplicate column" error. Simulate a database from before the `note`
+        column existed and confirm init() backfills it."""
+        with store._connect() as conn:
+            conn.execute("ALTER TABLE practice_trades RENAME TO practice_trades_old")
+            conn.execute(
+                "CREATE TABLE practice_trades ("
+                "  id INTEGER PRIMARY KEY,"
+                "  account_id INTEGER NOT NULL,"
+                "  ts TEXT NOT NULL,"
+                "  side TEXT NOT NULL,"
+                "  ticker TEXT NOT NULL,"
+                "  shares REAL NOT NULL,"
+                "  price REAL NOT NULL,"
+                "  fee REAL NOT NULL DEFAULT 0,"
+                "  ccy TEXT NOT NULL DEFAULT ''"
+                ")"  # no `note` column — an older schema version
+            )
+            conn.execute("DROP TABLE practice_trades_old")
+
+        store.init()  # should backfill `note` via ALTER, not crash
+
+        aid = store.practice_get_or_create("Alice")["id"]
+        store.practice_record_trade(aid, "buy", "AAPL", 1, 100.0)
+        tid = int(store.practice_trades(aid).iloc[0]["id"])
+        store.practice_set_trade_note(tid, "worked")  # would raise if `note` is missing
+        self.assertEqual(store.practice_trades(aid).iloc[0]["note"], "worked")
+
+        store.init()  # second pass over the now-current schema must not raise
+
 
 if __name__ == "__main__":
     unittest.main()
