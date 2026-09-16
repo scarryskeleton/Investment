@@ -105,7 +105,7 @@ def render_research() -> None:
                  "World stocks (VT)": "VT", "Nasdaq-100 (QQQ)": "QQQ"}[bench_label]
     lookback = sb.slider("Years of history", 1.0, 15.0, 8.0, 0.5)
     jump = sb.text_input("…or jump straight to a ticker",
-                         placeholder="e.g. NVDA").upper().strip()
+                         placeholder="e.g. NVDA", key="research_jump").upper().strip()
     extra = sb.text_input("On the focused name, also compare",
                           placeholder="e.g. AAPL, GOOGL")
 
@@ -244,6 +244,13 @@ def render_research() -> None:
     else:
         st.caption("Yahoo returned no fundamentals for this ticker (common for bond "
                    "ETFs and non-US listings).")
+
+    if stats:
+        C.glossary_expander([
+            "P/E ratio (price-to-earnings)", "Forward P/E", "Price / book",
+            "Dividend yield", "Return on equity (ROE)", "Analyst target price",
+            "52-week range",
+        ], title="📖 New to these? What the key stats mean")
 
     # ---- Insights ----
     tips = research.business_insights(p, rel)

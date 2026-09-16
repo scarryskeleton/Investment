@@ -139,3 +139,16 @@ _FLAGS = {
 
 def _flag(country: str) -> str:
     return _FLAGS.get((country or "").strip(), "🌐")
+
+
+def glossary_expander(terms: list[str], title: str = "📖 What do these mean?") -> None:
+    """A compact, mode-local glossary — only the terms relevant here, pulled
+    from the shared ``pa.education`` glossary so wording stays consistent
+    with the full glossary in 📈 Analyze → Learn. Silently skips any term not
+    found there rather than erroring, so a typo just drops an entry."""
+    found = [(t, education.GLOSSARY[t]) for t in terms if t in education.GLOSSARY]
+    if not found:
+        return
+    with st.expander(title):
+        for term, text in found:
+            st.markdown(f"**{term}** — {text}")

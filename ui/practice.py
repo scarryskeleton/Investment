@@ -464,6 +464,12 @@ def render_paper() -> None:
         st.warning("No current price for: " + ", ".join(state.missing_prices)
                    + " — valued at cost for now.")
 
+    C.glossary_expander([
+        "Realized vs unrealized P&L", "Trading fee / commission", "FX fee",
+        "Basis point (bp)", "Weight (% of portfolio)", "Leaderboard return",
+        "Historical FX conversion",
+    ], title="📖 New to paper trading? What these terms mean")
+
     fees = _paper_fee_model()
 
     # ---- headline ----
@@ -480,9 +486,13 @@ def render_paper() -> None:
 
     c = st.columns(4)
     c[0].metric("Total value", C.EUR.format(state.total_value),
-                f"{state.total_pnl:+,.0f}  ({state.total_pnl_pct:+.1%})")
-    c[1].metric("Cash to invest", C.EUR.format(state.cash))
-    c[2].metric("In the market", C.EUR.format(state.invested))
+                f"{state.total_pnl:+,.0f}  ({state.total_pnl_pct:+.1%})",
+                help="Cash plus what your holdings are worth right now, vs. what "
+                     "you started with.")
+    c[1].metric("Cash to invest", C.EUR.format(state.cash),
+                help="Uninvested fake money, ready to spend on your next trade.")
+    c[2].metric("In the market", C.EUR.format(state.invested),
+                help="Current value of everything you currently hold.")
     if not ec.empty and "All-in S&P 500" in ec.columns:
         spy_val = float(ec["All-in S&P 500"].iloc[-1])
         c[3].metric("If you'd bought only S&P 500", C.EUR.format(spy_val),
@@ -537,6 +547,13 @@ def render_paper() -> None:
             + (f" → **{C.EUR2.m(cash_out)}** {'out' if side == 'Buy' else 'in'}"
                if fee else "")
         )
+        if qc[1].button(f"🔎 Research {tk} first", key=f"paper_research_{tk}",
+                        help="Before you trade it: the business, key stats, "
+                             "analyst estimates and how it's performed."):
+            st.session_state["research_jump"] = tk
+            st.session_state["current_mode"] = "🔎 Research"
+            st.session_state.pop("app_mode_top", None)
+            st.rerun()
         _intraday_chart(tk, key=f"intraday_trade_{tk}")
         pos = next((p for p in state.positions if p.ticker == tk), None)
         if st.button(f"{side} {tk}", type="primary", disabled=not can_edit):
@@ -578,8 +595,12 @@ def render_paper() -> None:
         } for p in state.positions])
         st.dataframe(hdf, hide_index=True, use_container_width=True)
         d = st.columns(4)
-        d[0].metric("Unrealized P&L", C.EUR.format(sum(p.unrealized for p in state.positions)))
-        d[1].metric("Realized P&L", C.EUR.format(state.realized_pnl))
+        d[0].metric("Unrealized P&L", C.EUR.format(sum(p.unrealized for p in state.positions)),
+                    help="Paper gain/loss on what you still hold, at today's price — "
+                         "not locked in, moves every day. See the glossary above.")
+        d[1].metric("Realized P&L", C.EUR.format(state.realized_pnl),
+                    help="Gains/losses already locked in by selling — this part "
+                         "can't change anymore.")
         d[2].metric("Fees paid", C.EUR2.format(state.fees_paid),
                     help="Total commission + FX fees across every trade so far.")
         d[3].metric("Trades made", state.n_trades)

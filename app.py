@@ -50,11 +50,44 @@ for _k, _v in _DEFAULTS.items():
 
 
 # --------------------------------------------------------------------------- #
-# Sidebar - mode switch, then account / portfolio editor / inputs
+# Top bar - mode switch lives here, not buried in the sidebar, so getting from
+# any mode to any other (e.g. "quickly go look this up in Research") is one
+# click at the top of the screen instead of opening the sidebar and hunting
+# for a radio button.
+# --------------------------------------------------------------------------- #
+_MODES = ["🌱 Explore", "🔎 Research", "🎮 Practice", "📈 Analyze"]
+_MODE_BLURB = {
+    "🌱 Explore": "No holdings needed — a beginner risk/mix sandbox.",
+    "🔎 Research": "Look up any stock or bond — the business, its stats, "
+                   "and how it's performed.",
+    "🎮 Practice": "Paper-trade with fake money at real prices.",
+    "📈 Analyze": "Optimise a portfolio you already have.",
+}
+st.session_state.setdefault("current_mode", _MODES[0])
+
+top_l, top_r = st.columns([2, 3], vertical_alignment="center")
+with top_l:
+    st.markdown("#### 📊 Portfolio Suggestions")
+with top_r:
+    # `key` not `default` drives this after the first run - a plain click on
+    # the already-selected pill toggles it to None (segmented_control lets
+    # you deselect), so we only adopt a *non-None* pick and otherwise keep
+    # whatever mode was already active.
+    _picked = st.segmented_control(
+        "Mode", _MODES, default=st.session_state.current_mode,
+        key="app_mode_top", label_visibility="collapsed",
+    )
+    if _picked:
+        st.session_state.current_mode = _picked
+app_mode = st.session_state.current_mode
+st.caption(f"{_MODE_BLURB[app_mode]}  ·  Decision-support only — not investment advice.")
+st.divider()
+
+# --------------------------------------------------------------------------- #
+# Sidebar - account currency, then the active mode's own inputs
 # --------------------------------------------------------------------------- #
 sb = st.sidebar
 sb.title("📊 Portfolio Suggestions")
-sb.caption("Decision-support only — not investment advice.")
 
 _saved_ccy = store.get_setting("currency", "EUR")
 _ccy_idx = fx.CURRENCIES.index(_saved_ccy) if _saved_ccy in fx.CURRENCIES else 0
@@ -76,17 +109,6 @@ EUR2.ccy = ACCOUNT_CCY
 # stale copy at import time.
 C.ACCOUNT_CCY = ACCOUNT_CCY
 CCY_SYM = fx.symbol(ACCOUNT_CCY).strip() or ACCOUNT_CCY
-sb.divider()
-
-app_mode = sb.radio(
-    "Mode",
-    ["🌱 Explore from cash", "🔎 Research a stock or bond",
-     "🎮 Practice portfolio", "📈 Analyze a portfolio"],
-    key="app_mode",
-    help="Explore = beginner risk/mix sandbox. Research = look up one security. "
-         "Practice = paper-trade with fake money at real prices. "
-         "Analyze = optimise a portfolio you already have.",
-)
 sb.divider()
 
 if app_mode.startswith("🌱"):

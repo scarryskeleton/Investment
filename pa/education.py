@@ -138,6 +138,101 @@ GLOSSARY: dict[str, str] = {
         "Cash set aside (often ~3–6 months of expenses) for surprises, kept "
         "safe and instantly accessible — separate from anything invested."
     ),
+    # ---- Practice portfolio (paper trading) ---- #
+    "Realized vs unrealized P&L": (
+        "Unrealized = the paper gain/loss on what you still hold, based on "
+        "today's price — it moves every day and isn't 'yours' until you sell. "
+        "Realized = gains/losses already locked in by selling. Only realized "
+        "P&L can't change afterward."
+    ),
+    "Trading fee / commission": (
+        "What a broker charges to place a trade — a flat amount, a percentage "
+        "of the trade's value, or both. Real brokers vary a lot; the practice "
+        "portfolio lets you model a few common shapes so you can see how much "
+        "fees eat into returns over many trades."
+    ),
+    "FX fee": (
+        "An extra charge some brokers add when you buy something priced in a "
+        "different currency from your account — on top of the exchange rate "
+        "itself. Modelled here as basis points (see below) on top of the "
+        "trade's value, only for holdings not in your account currency."
+    ),
+    "Basis point (bp)": (
+        "1/100th of one percent (0.01%). 25 bps = 0.25%. Fees and small rates "
+        "are usually quoted this way because percentages that small are "
+        "awkward to say out loud."
+    ),
+    "Weight (% of portfolio)": (
+        "How much of the total portfolio value one holding makes up. If "
+        "AAPL is 20% weight, a 10% move in AAPL alone moves the whole "
+        "portfolio by about 2%."
+    ),
+    "Leaderboard return": (
+        "Each practice account's total value versus its own starting cash — "
+        "not versus anyone else's. That makes accounts with different starting "
+        "amounts, currencies or start dates comparable on the same ranking."
+    ),
+    "Historical FX conversion": (
+        "When a holding is priced in a different currency than your account, "
+        "its value is converted using the exchange rate *on that date* — not "
+        "today's rate applied retroactively. That means a currency move since "
+        "you bought is part of your real gain or loss, exactly as it would be "
+        "for a real broker account."
+    ),
+    # ---- Research / Outlook ---- #
+    "P/E ratio (price-to-earnings)": (
+        "Share price divided by profit-per-share. Roughly: how many years of "
+        "current profit it would take to earn back the price. Higher usually "
+        "means the market expects faster future growth (or the stock is "
+        "expensive) — there's no single 'right' number, but ~15–20 has "
+        "historically been a rough US market average."
+    ),
+    "Forward P/E": (
+        "Same idea as P/E, but using *analysts' estimated* future profit "
+        "instead of the last reported year. Forward-looking, so it's only as "
+        "good as the estimate — and estimates are frequently wrong."
+    ),
+    "Price / book": (
+        "Share price divided by the company's accounting net worth per share. "
+        "Below 1 can mean the market thinks the company is worth less than its "
+        "books say (or that the books overstate real value) — common for "
+        "banks and industrials, rare for asset-light tech companies."
+    ),
+    "Dividend yield": (
+        "Annual cash dividend divided by share price — the 'income' portion "
+        "of a stock's return, separate from any price change. Not guaranteed: "
+        "companies can and do cut dividends."
+    ),
+    "Return on equity (ROE)": (
+        "Profit divided by shareholders' accounting equity — how efficiently "
+        "a company turns the money invested in it into profit. Compare within "
+        "the same sector; capital-heavy businesses (utilities, banks) and "
+        "asset-light ones (software) sit at very different normal levels."
+    ),
+    "Analyst target price": (
+        "The average price professional analysts covering the stock expect "
+        "it to reach, usually over 12 months. Frequently wrong, tends to "
+        "cluster near the current price, and says more about consensus "
+        "sentiment than about the future."
+    ),
+    "Up-market / down-market capture": (
+        "In months the benchmark rose, how much of that rise this holding "
+        "captured (up-capture); in months it fell, how much of that fall it "
+        "took (down-capture). Below 100% on the down side and above 100% on "
+        "the up side is the 'best of both' — rare in practice."
+    ),
+    "Correlation": (
+        "-1 to +1: how closely two things' returns move together. +1 = "
+        "perfect lockstep, 0 = unrelated, -1 = perfect opposites. Adding "
+        "something with low or negative correlation to what you hold is what "
+        "'diversification' means mathematically."
+    ),
+    "52-week range": (
+        "The lowest and highest price over the past year. Where the current "
+        "price sits in that range is a quick, crude read on whether it's "
+        "'high' or 'low' lately — it says nothing about whether that's "
+        "deserved."
+    ),
 }
 
 # --------------------------------------------------------------------------- #
