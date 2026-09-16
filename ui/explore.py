@@ -66,6 +66,20 @@ def render_explore() -> None:
         bond_label = st.selectbox("Bond sleeve", list(_BOND_SLEEVES), index=0)
     stock_ticker, bond_ticker = _STOCK_SLEEVES[stock_label], _BOND_SLEEVES[bond_label]
 
+    _rl, _rr = sb.columns(2)
+    if _rl.button(f"🔎 What is {stock_ticker}?", use_container_width=True,
+                  help="Look it up in Research mode: what it holds, its stats, "
+                       "how it's performed."):
+        st.session_state["research_jump"] = stock_ticker
+        st.session_state["current_mode"] = "🔎 Research"
+        st.session_state.pop("app_mode_top", None)
+        st.rerun()
+    if _rr.button(f"🔎 What is {bond_ticker}?", use_container_width=True):
+        st.session_state["research_jump"] = bond_ticker
+        st.session_state["current_mode"] = "🔎 Research"
+        st.session_state.pop("app_mode_top", None)
+        st.rerun()
+
     sb.subheader("A monthly savings plan")
     start_value = sb.number_input(f"Starting amount ({C.ACCOUNT_CCY})", 0, 5_000_000, 1_000, 250)
     monthly_contribution = sb.number_input(f"Added every month ({C.ACCOUNT_CCY})", 0, 200_000,
@@ -89,6 +103,11 @@ def render_explore() -> None:
         "buttons) and watch every number below react. Nothing here is real money "
         "or a recommendation — it's a sandbox for building intuition."
     )
+    C.glossary_expander([
+        "Asset class", "Diversification", "Index fund / ETF", "Time horizon",
+        "Volatility / risk", "Efficient frontier", "Dollar-cost averaging",
+        "Rebalancing", "Monte Carlo simulation",
+    ], title="📖 New to this? What these words mean")
 
     try:
         m = _explore_mix(stock_pct, stock_ticker, bond_ticker, C.ACCOUNT_CCY)
@@ -167,10 +186,18 @@ def render_explore() -> None:
     st.plotly_chart(fig, use_container_width=True)
 
     d = st.columns(4)
-    d[0].metric("You'd put in", C.EUR.format(proj.total_contributed))
-    d[1].metric("Typical outcome", C.EUR.format(proj.end_median))
-    d[2].metric("Unlucky (10th pct)", C.EUR.format(proj.end_low))
-    d[3].metric("Lucky (90th pct)", C.EUR.format(proj.end_high))
+    d[0].metric("You'd put in", C.EUR.format(proj.total_contributed),
+                help="Starting amount plus every monthly contribution added up — "
+                     "no growth included, just what came out of your pocket.")
+    d[1].metric("Typical outcome", C.EUR.format(proj.end_median),
+                help="The middle result across 1,000 simulated runs — as many "
+                     "ran better as ran worse.")
+    d[2].metric("Unlucky (10th pct)", C.EUR.format(proj.end_low),
+                help="Only 1 in 10 simulated runs did worse than this — a rough "
+                     "'bad case' to plan around.")
+    d[3].metric("Lucky (90th pct)", C.EUR.format(proj.end_high),
+                help="Only 1 in 10 simulated runs did better than this — don't "
+                     "count on it.")
 
     if proj.method == "neural" and proj.faithfulness and proj.faithfulness.get("ok"):
         f = proj.faithfulness
@@ -205,19 +232,31 @@ def render_explore() -> None:
 
     st.divider()
     st.subheader("Things to try")
-    st.markdown(
-        """
-        - Drag the slider to **100% stocks** — see the return rise and the *worst
-          drop* get much deeper. Then to **20%** — calmer, but the growth chart
-          flattens.
-        - Set the plan to **40 years** instead of 15 — notice how the unlucky
-          case improves relative to what you put in. Time is the biggest lever.
-        - Switch *How to imagine the future* to the **neural generator** and back.
-          They should roughly agree — where they don't, that gap is model
-          uncertainty, and neither one is "the answer".
-        - Read the **📖 Learn** ideas below, then come back to this page.
-        """
-    )
+    tt_l, tt_r = st.columns([3, 1])
+    with tt_l:
+        st.markdown(
+            """
+            - Drag the slider to **100% stocks** — see the return rise and the *worst
+              drop* get much deeper. Then to **20%** — calmer, but the growth chart
+              flattens.
+            - Set the plan to **40 years** instead of 15 — notice how the unlucky
+              case improves relative to what you put in. Time is the biggest lever.
+            - Switch *How to imagine the future* to the **neural generator** and back.
+              They should roughly agree — where they don't, that gap is model
+              uncertainty, and neither one is "the answer".
+            - Curious what **{stock}** or **{bond}** actually are? Use the "What is
+              ...?" buttons in the sidebar.
+            """.format(stock=stock_ticker, bond=bond_ticker)
+        )
+    with tt_r:
+        st.markdown("&nbsp;")
+        if st.button("🎮 Try this mix with fake money", use_container_width=True,
+                     help=f"Switch to Practice portfolio with {stock_ticker} "
+                          "ready to trade."):
+            st.session_state["paper_tk"] = stock_ticker
+            st.session_state["current_mode"] = "🎮 Practice"
+            st.session_state.pop("app_mode_top", None)
+            st.rerun()
     with st.expander("📖 New to this? Read the primer"):
         st.markdown(education.GETTING_STARTED)
 
