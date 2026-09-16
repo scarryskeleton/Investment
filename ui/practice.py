@@ -10,9 +10,16 @@ from pa import fx, paper, store
 from ui import common as C
 
 
-def _intraday_chart(ticker: str) -> None:
+def _intraday_chart(ticker: str, key: str) -> None:
     """A compact 'how it's been moving' line — hourly bars when Yahoo has
-    them for this ticker, daily bars over a longer window otherwise."""
+    them for this ticker, daily bars over a longer window otherwise.
+
+    ``key`` must be unique per call *site* (not just per ticker): this renders
+    once from the trade ticket and once from the holdings picker, and those
+    can land on the same ticker in the same run (e.g. buying more of
+    something you already hold) — without distinct keys Streamlit can't tell
+    the two `st.plotly_chart` calls apart and raises StreamlitDuplicateElementId.
+    """
     hist, gran = C._intraday(ticker)
     if hist.empty or len(hist) < 2:
         return
@@ -27,7 +34,8 @@ def _intraday_chart(ticker: str) -> None:
     fig.update_layout(height=130, margin=dict(t=0, b=0, l=0, r=0), showlegend=False,
                       xaxis_title="", yaxis_title="")
     fig.update_xaxes(showgrid=False)
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False},
+                    key=key)
 
 
 @st.cache_data(show_spinner=False, ttl=60 * 60 * 6)
@@ -529,7 +537,7 @@ def render_paper() -> None:
             + (f" → **{C.EUR2.m(cash_out)}** {'out' if side == 'Buy' else 'in'}"
                if fee else "")
         )
-        _intraday_chart(tk)
+        _intraday_chart(tk, key=f"intraday_trade_{tk}")
         pos = next((p for p in state.positions if p.ticker == tk), None)
         if st.button(f"{side} {tk}", type="primary", disabled=not can_edit):
             if not can_edit:
@@ -579,7 +587,7 @@ def render_paper() -> None:
         st.subheader("Price movement")
         _pick = st.selectbox("Holding", [p.ticker for p in state.positions],
                              key="paper_movement_pick")
-        _intraday_chart(_pick)
+        _intraday_chart(_pick, key=f"intraday_holding_{_pick}")
 
         _render_paper_overview(state, acct_ccy)
     elif trades.empty:

@@ -168,15 +168,35 @@ class _TursoConn:
     access to it with a lock, they don't connect or disconnect.
     """
 
-    def __init__(self, raw, lock: "threading.Lock") -> None:
+    def __init__(self, raw, lock: "threading.RLock", creds: tuple[str, str]) -> None:
         self._raw = raw
         self._lock = lock
+        self._creds = creds  # (url, token), so a dead connection can be replaced
+
+    def _reconnect(self):
+        """Drop the stale connection and open a fresh one in its place.
+
+        Called from inside a lock we already hold (``__enter__`` acquired it
+        for the whole ``with`` block) - safe only because ``_turso_lock`` is
+        an ``RLock``, which the same thread can re-acquire.
+        """
+        _turso_invalidate()
+        self._raw = _turso_raw(*self._creds)
+        return self._raw
 
     def execute(self, sql: str, params: tuple = ()) -> _TursoCursor:
-        return _TursoCursor(self._raw.execute(sql, params))
+        try:
+            return _TursoCursor(self._raw.execute(sql, params))
+        except Exception:
+            self._reconnect()
+            return _TursoCursor(self._raw.execute(sql, params))
 
     def executescript(self, sql: str) -> None:
-        self._raw.executescript(sql)
+        try:
+            self._raw.executescript(sql)
+        except Exception:
+            self._reconnect()
+            self._raw.executescript(sql)
 
     def __enter__(self) -> "_TursoConn":
         self._lock.acquire()
@@ -184,14 +204,28 @@ class _TursoConn:
 
     def __exit__(self, exc_type, exc, tb) -> bool:
         try:
-            (self._raw.rollback() if exc_type else self._raw.commit())
+            if exc_type:
+                try:
+                    self._raw.rollback()
+                except Exception:
+                    pass  # the with-block's own exception is what matters here
+            else:
+                try:
+                    self._raw.commit()
+                except Exception:
+                    # connection likely died between the last execute() and here -
+                    # one reconnect-and-retry before giving up
+                    self._reconnect()
+                    self._raw.commit()
         finally:
             self._lock.release()
         return False
 
 
 _turso_singleton = None  # the one long-lived libsql connection for this process
-_turso_lock = threading.Lock()
+# Reentrant: a query that fails mid-``with`` reconnects *while already holding
+# this lock* (see ``_TursoConn._reconnect``) — a plain Lock would deadlock.
+_turso_lock = threading.RLock()
 
 
 def _turso_raw(url: str, token: str):
@@ -211,10 +245,21 @@ def _turso_raw(url: str, token: str):
         return _turso_singleton
 
 
+def _turso_invalidate() -> None:
+    """Drop the cached connection so the next ``_turso_raw`` call opens a
+    fresh one. Used when a query fails - most commonly because Turso closed
+    the connection server-side after the app sat idle, which otherwise left
+    every subsequent request stuck failing against the same dead connection
+    until someone manually restarted the server."""
+    global _turso_singleton
+    with _turso_lock:
+        _turso_singleton = None
+
+
 def _connect():
     creds = _turso_creds()
     if creds:
-        return _TursoConn(_turso_raw(*creds), _turso_lock)
+        return _TursoConn(_turso_raw(*creds), _turso_lock, creds)
 
     DB_PATH.parent.mkdir(exist_ok=True)
     conn = sqlite3.connect(DB_PATH)

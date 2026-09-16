@@ -160,15 +160,35 @@ def render_research() -> None:
             if picked:
                 focus = btbl.index[picked[0]]
 
-    focus = (jump or searched or focus or (uni[0] if uni else "MSFT")).upper()
+    override = st.session_state.pop("_research_focus_override", None)
+    focus = (override or jump or searched or focus or (uni[0] if uni else "MSFT")).upper()
 
     st.divider()
-    if searched and not jump:
+    if searched and not jump and not override:
         st.caption(f"Showing your search pick — **{focus}**. Pick a different match "
                    "in the sidebar, or clear the search box to go back to the list.")
     b = _research_bundle(focus, benchmark, lookback)
     if b is None:
-        st.error(f"No price data for **{focus}** — check the symbol.")
+        # The literal ticker didn't resolve - many non-US listings need an
+        # exchange suffix (Adyen is ADYEN.AS, not ADYEN). Try the same name/
+        # ticker search the sidebar box uses, and offer any matches instead
+        # of just failing on what was typed.
+        suggestions = _symbol_search(focus) if jump else []
+        if suggestions:
+            st.warning(f"No price data for **{focus}** as a ticker on its own — "
+                       "did you mean one of these?")
+            cols = st.columns(min(4, len(suggestions)))
+            for i, m in enumerate(suggestions[:4]):
+                label = f"{m['symbol']} · {m['name'][:26]}"
+                if cols[i].button(label, key=f"sugg_{m['symbol']}", use_container_width=True):
+                    st.session_state["_research_focus_override"] = m["symbol"]
+                    st.rerun()
+            st.caption("Non-US listings usually need an exchange suffix, e.g. "
+                       "`ADYEN.AS` (Amsterdam), `SHEL.L` (London), `7203.T` (Tokyo).")
+        else:
+            st.error(f"No price data for **{focus}** — check the symbol. Non-US listings "
+                     "often need an exchange suffix (e.g. `ADYEN.AS`, `SHEL.L`) — try the "
+                     "**🔎 Find any company** search in the sidebar instead.")
         return
 
     p, rel, tc, o = b["profile"], b["rel"], b["trend"], b["outlook"]
