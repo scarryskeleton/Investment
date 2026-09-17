@@ -122,7 +122,10 @@ def browse_table(
 
         fr = f.loc[t].to_dict() if t in f.index else {}
         qt = str(fr.get("quote_type", "")).upper()
-        typ = "ETF" if qt in ("ETF", "MUTUALFUND") else "Stock" if qt == "EQUITY" else "—"
+        typ = ("ETF" if qt in ("ETF", "MUTUALFUND") else
+               "Stock" if qt == "EQUITY" else
+               "Crypto" if qt == "CRYPTOCURRENCY" else
+               "Currency" if qt == "CURRENCY" else "—")
 
         rows.append({
             "Ticker": t,
@@ -293,6 +296,23 @@ def business_insights(profile: dict, rel: RelativeStats | None = None) -> list[s
                            "moves *opposite* to interest rates (rates up, price down).")
             else:
                 out.append(f"Yields about **{y*100:.1f}%** in dividends.")
+    elif qt == "CRYPTOCURRENCY":
+        out.append("This is a **cryptocurrency**, not a company or a fund — no earnings, "
+                   "no dividend, no P/E. Its price is driven entirely by supply, demand and "
+                   "sentiment, which is why it swings far more than stocks.")
+        out.append("It trades **24/7, every day** — including weekends — unlike stocks and "
+                   "ETFs, which only trade during exchange hours.")
+        if rel is not None and rel.beta == rel.beta:
+            out.append(f"Correlation with {rel.benchmark} has been **{rel.corr:.2f}** over "
+                       "this window — historically low-to-moderate, though it has risen in "
+                       "some periods, which weakens its diversification case.")
+    elif qt == "CURRENCY":
+        out.append("This is a **currency pair**, not an investment in a business — its price "
+                   "reflects the exchange rate between two currencies, moved by interest-rate "
+                   "differences, trade flows and macro sentiment, not company performance.")
+        out.append("Holding a foreign currency directly (rather than assets priced in it) "
+                   "doesn't compound the way stocks or bonds do — there's no earnings or "
+                   "coupon underneath it, just the rate itself moving.")
     else:
         pe = _num(p.get("trailing_pe"))
         if pe == pe and pe > 0:

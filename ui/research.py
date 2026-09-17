@@ -90,7 +90,8 @@ def render_research() -> None:
     sb.divider()
     sb.subheader("Browse a list")
     src = sb.selectbox(
-        "List", ["Stocks & bonds (curated ETFs)", "Popular stocks", "S&P 500", "My own list"],
+        "List", ["Stocks & bonds (curated ETFs)", "Popular stocks",
+                 "🪙 Crypto & currencies", "S&P 500", "My own list"],
         help="Scan the table, click a row to focus that name below.",
     )
     my_list_txt = ""
@@ -100,9 +101,10 @@ def render_research() -> None:
 
     bench_label = sb.selectbox(
         "Compare against", ["S&P 500 (SPY)", "US bonds (BND)", "World stocks (VT)",
-                            "Nasdaq-100 (QQQ)"], index=0)
+                            "Nasdaq-100 (QQQ)", "Bitcoin (BTC-USD)"], index=0)
     benchmark = {"S&P 500 (SPY)": "SPY", "US bonds (BND)": "BND",
-                 "World stocks (VT)": "VT", "Nasdaq-100 (QQQ)": "QQQ"}[bench_label]
+                 "World stocks (VT)": "VT", "Nasdaq-100 (QQQ)": "QQQ",
+                 "Bitcoin (BTC-USD)": "BTC-USD"}[bench_label]
     lookback = sb.slider("Years of history", 1.0, 15.0, 8.0, 0.5)
     jump = sb.text_input("…or jump straight to a ticker",
                          placeholder="e.g. NVDA", key="research_jump").upper().strip()
@@ -120,6 +122,8 @@ def render_research() -> None:
         uni = list(universe.CURATED_ETFS)
     elif src == "Popular stocks":
         uni = list(universe.POPULAR_STOCKS)
+    elif src == "🪙 Crypto & currencies":
+        uni = list(universe.CRYPTO_FX)
     elif src == "S&P 500":
         try:
             uni = universe.sp500_tickers()

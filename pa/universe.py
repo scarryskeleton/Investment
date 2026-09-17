@@ -32,6 +32,7 @@ CURATED_ETFS: dict[str, tuple[str, str]] = {
     "XLB": ("Materials", "US Sector"),
     "XLRE": ("Real Estate", "US Sector"),
     "XLC": ("Communication Services", "US Sector"),
+    "ITA": ("Aerospace & Defense", "US Sector"),
     # Fixed income
     "BND": ("US Aggregate Bonds", "Fixed Income"),
     "IEF": ("7-10Y Treasuries", "Fixed Income"),
@@ -45,6 +46,8 @@ CURATED_ETFS: dict[str, tuple[str, str]] = {
     "SLV": ("Silver", "Real Assets"),
     "DBC": ("Broad Commodities", "Real Assets"),
     "VNQ": ("US REITs", "Real Assets"),
+    # Crypto
+    "IBIT": ("Bitcoin", "Crypto"),
 }
 
 
@@ -55,18 +58,44 @@ POPULAR_STOCKS: list[str] = [
     # US tech
     "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "AMD", "CRM",
     "ADBE", "ORCL", "CSCO", "IBM", "QCOM", "TXN", "INTC", "PLTR",
-    # Financials
-    "JPM", "BAC", "V", "MA", "GS", "BRK-B",
+    # Financials (incl. fintech)
+    "JPM", "BAC", "V", "MA", "GS", "BRK-B", "PYPL",
     # Health care
     "UNH", "JNJ", "LLY", "PFE", "MRK", "ABBV", "TMO",
-    # Energy / industrials / materials
-    "XOM", "CVX", "BA", "CAT", "GE", "HON", "LMT", "DE", "UPS",
-    # Consumer
+    # Energy
+    "XOM", "CVX", "COP", "SLB",
+    # Industrials
+    "CAT", "GE", "HON", "DE", "UPS",
+    # Defense & aerospace ("war" stocks)
+    "LMT", "RTX", "NOC", "GD",
+    # Aviation (airlines + planemaker)
+    "BA", "DAL", "UAL", "LUV",
+    # Mining, metals & other resources
+    "BHP", "RIO", "FCX", "NEM", "VALE", "SCCO",
+    # Real estate (REITs)
+    "AMT", "PLD", "SPG", "O", "EQIX",
+    # Consumer staples & discretionary
     "KO", "PEP", "PG", "COST", "WMT", "HD", "MCD", "NKE", "SBUX", "DIS", "NFLX",
     "T", "VZ",
+    # Retail specifically
+    "TGT", "LOW", "TJX",
+    # Crypto-related equities (the coins themselves are in CRYPTO_FX)
+    "COIN", "MSTR", "MARA",
     # International (US listings / ADRs)
     "ASML", "TSM", "NVO", "SAP", "SHEL", "AZN", "TM", "BABA", "TTE", "UL", "BP",
-    "SONY", "HSBC", "RIO",
+    "SONY", "HSBC",
+]
+
+# Spot cryptocurrencies and major currency pairs - not companies or funds, so
+# they show up in Research with no fundamentals (no P/E, no sector), but their
+# price history, volatility and vs-benchmark comparison all work the same way.
+# A separate list because mixing them into POPULAR_STOCKS would misleadingly
+# imply they're equities.
+CRYPTO_FX: list[str] = [
+    # Crypto (priced in USD)
+    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "DOGE-USD",
+    # Major currency pairs
+    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "USDCHF=X", "AUDUSD=X", "USDCNY=X",
 ]
 
 
