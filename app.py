@@ -80,7 +80,8 @@ with top_r:
     if _picked:
         st.session_state.current_mode = _picked
 app_mode = st.session_state.current_mode
-st.caption(f"{_MODE_BLURB[app_mode]}  ·  Decision-support only — not investment advice.")
+st.caption(f"{_MODE_BLURB[app_mode]}  ·  Decision-support only — not investment advice.  "
+           "·  🎨 Prefer light or dark? Use the **⋮ menu** (top right) **→ Light/Dark/System**.")
 
 # A map of the app that opens itself on a brand-new browser session (so a
 # student arriving from a link needs no one to explain it), then folds away

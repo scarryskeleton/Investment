@@ -464,6 +464,17 @@ def render_paper() -> None:
         st.warning("No current price for: " + ", ".join(state.missing_prices)
                    + " — valued at cost for now.")
 
+    if trades_raw.empty:
+        st.success(
+            "**👋 First time here? Do this:**\n\n"
+            "1. **Pick a ticker you know** — type it in *Ticker* below. Not sure what "
+            "to try? A company you use (AAPL, KO…) or a broad fund (VTI, BND) both work.\n"
+            "2. **Buy a few shares** — enter an amount and hit Buy. It's fake money, "
+            "so there's nothing to lose by trying.\n"
+            "3. **Come back in a few days** and check *'How you're doing vs the "
+            "market'* below — that comparison is the whole point of this mode."
+        )
+
     C.glossary_expander([
         "Realized vs unrealized P&L", "Trading fee / commission", "FX fee",
         "Basis point (bp)", "Weight (% of portfolio)", "Leaderboard return",

@@ -5,5 +5,9 @@ headless = true
 [browser]
 gatherUsageStats = false
 
-[theme]
-base = "light"
+# No [theme] section, on purpose: pinning a theme here hides Streamlit's own
+# viewer-facing theme picker (Settings -> light/dark/system, in the top-right
+# menu). Leaving it unset defaults new visitors to their system preference
+# and lets everyone switch for themselves - see the in-app toggle in
+# app.py's top bar, which does the same switch with one click instead of
+# needing to find that menu.
