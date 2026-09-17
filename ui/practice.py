@@ -338,9 +338,22 @@ def _paper_access(profile: str) -> bool:
     sb = st.sidebar
     key = f"unlocked::{profile}"
     has_pw = store.profile_has_password(profile)
+    pw_key = f"pwval::{profile}"
+
+    # A button click (below) can't call _paper_try_unlock directly: that
+    # clears st.session_state[pw_key], and the text_input for pw_key has
+    # already been instantiated earlier in *this* run, which Streamlit
+    # forbids (StreamlitWidgetAlreadyInstantiatedError). So the button
+    # instead sets this flag and reruns; we process it here, before that
+    # widget exists for the new run — and before deciding which branch
+    # below to take, so a successful unlock shows the unlocked UI right
+    # away instead of flashing the locked one for one more rerun.
+    # Enter-to-submit (on_change) doesn't hit this, since callbacks run
+    # before the script does.
+    if st.session_state.pop(f"{pw_key}::submit", False):
+        _paper_try_unlock(profile, key, pw_key)
 
     if has_pw and not st.session_state.get(key):
-        pw_key = f"pwval::{profile}"
         sb.caption(f"🔒 **{profile}** is password-protected. Anyone can "
                    "view it — you need the password to trade, undo or reset.")
         sb.text_input(
@@ -349,7 +362,7 @@ def _paper_access(profile: str) -> bool:
             on_change=_paper_try_unlock, args=(profile, key, pw_key),
         )
         if sb.button("Unlock", use_container_width=True):
-            _paper_try_unlock(profile, key, pw_key)
+            st.session_state[f"{pw_key}::submit"] = True
             st.rerun()
         if st.session_state.get(f"{key}::err"):
             sb.error("Wrong password.")
