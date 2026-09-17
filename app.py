@@ -81,6 +81,38 @@ with top_r:
         st.session_state.current_mode = _picked
 app_mode = st.session_state.current_mode
 st.caption(f"{_MODE_BLURB[app_mode]}  ·  Decision-support only — not investment advice.")
+
+# A map of the app that opens itself on a brand-new browser session (so a
+# student arriving from a link needs no one to explain it), then folds away
+# on the very next rerun so it doesn't nag a returning visitor - still one
+# click to reopen from here at any time.
+_first_visit = "_seen_orientation" not in st.session_state
+with st.expander("🧭 New here? What each mode is for, and where to start",
+                 expanded=_first_visit):
+    st.markdown(
+        """
+This dashboard has **four modes**, meant to be tried roughly in this order —
+click a pill above to jump to any of them:
+
+1. **🌱 Explore** — no real holdings needed. Drag one slider to see how a
+   simple stocks/bonds mix behaves: its returns, its worst drops, what
+   saving a bit each month could grow into. Start here to build a feel for
+   risk before anything else.
+2. **🔎 Research** — once something catches your eye (in Explore, or just a
+   company name), look it up here: what the business does, its key stats,
+   and how it's actually performed.
+3. **🎮 Practice** — ready to try it for real? Trade with fake money at
+   real market prices, track your gains and losses, and compare against
+   others on the leaderboard. No real money, ever.
+4. **📈 Analyze** — for a portfolio you (or someone) actually holds: checks
+   how risky and diversified it is and suggests ways to balance it.
+
+Nothing here is investment advice — it's a set of tools for understanding
+how investing behaves, using real market data and your own decisions.
+        """
+    )
+st.session_state["_seen_orientation"] = True
+
 st.divider()
 
 # --------------------------------------------------------------------------- #
