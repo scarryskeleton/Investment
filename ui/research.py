@@ -59,6 +59,13 @@ def _symbol_search(query):
     return data.search_symbols(query, limit=10)
 
 
+@st.cache_data(show_spinner=False, ttl=60 * 60 * 24)
+def _sp500_list():
+    from pa import universe
+
+    return universe.sp500_tickers()
+
+
 def render_research() -> None:
     """Mode: search / browse stocks & bonds, then focus one for business detail."""
     from pa import data as data_mod
@@ -126,7 +133,7 @@ def render_research() -> None:
         uni = list(universe.CRYPTO_FX)
     elif src == "S&P 500":
         try:
-            uni = universe.sp500_tickers()
+            uni = _sp500_list()
         except Exception:
             uni = list(universe.POPULAR_STOCKS)
             st.warning("Couldn't fetch the S&P 500 list — showing popular stocks instead.")

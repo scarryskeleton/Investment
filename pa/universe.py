@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import io
+
 import pandas as pd
+import requests
 
 # A compact set of liquid, broad exposures - "steady market" building blocks
 # useful for diversifying a concentrated single-stock portfolio.
@@ -107,9 +110,20 @@ def curated_universe() -> pd.DataFrame:
 
 
 def sp500_tickers() -> list[str]:
-    """Current S&P 500 constituents, scraped from Wikipedia."""
+    """Current S&P 500 constituents, scraped from Wikipedia.
+
+    ``pd.read_html(url)`` fetches with urllib's default User-Agent, which
+    Wikipedia's edge returns a 403 for - fetch the page ourselves with a
+    real one and hand the HTML to read_html instead.
+    """
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    tables = pd.read_html(url)
+    resp = requests.get(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; PortfolioResearchTool/1.0)"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    tables = pd.read_html(io.StringIO(resp.text))
     syms = tables[0]["Symbol"].astype(str).str.replace(".", "-", regex=False)
     return sorted(syms.str.strip().str.upper().tolist())
 
