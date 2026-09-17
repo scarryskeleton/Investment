@@ -130,6 +130,7 @@ def browse_table(
             "Type": typ,
             "Sector / category": fr.get("sector") if fr.get("sector") not in (None, "Unknown")
             else (fr.get("industry") or "—"),
+            "Country": fr.get("country") or "—",
             "1y return": ret_1y,
             "vs bench (1y)": excess,
             "Volatility": vol,

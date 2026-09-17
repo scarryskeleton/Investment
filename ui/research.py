@@ -133,20 +133,51 @@ def render_research() -> None:
     focus = None
 
     if uni:
+        _auto_load = len(uni) <= 70
+        load_fund = st.checkbox(
+            "🌍 Load sector, country, P/E & yield for this list",
+            value=_auto_load, key=f"load_fund_{src}",
+            help="Needed for the category/country filters below (and for P/E "
+                 "and yield in the table). Fast for a small list; the *first* "
+                 "load of a big one (the full S&P 500) can take a couple of "
+                 "minutes — after that it's cached and instant.",
+        )
         with st.spinner("Loading the list…"):
             pxu = C._universe_prices(tuple(sorted(set(uni + [benchmark]))), lookback)
-            fund = _universe_fundamentals(tuple(sorted(uni))) if len(uni) <= 70 else None
+            fund = _universe_fundamentals(tuple(sorted(uni))) if load_fund else None
             btbl = research.browse_table(
                 uni, pxu, pxu[benchmark] if benchmark in pxu.columns else None, fund
             )
         if btbl.empty:
             st.info("No price data for that list.")
         else:
-            st.markdown(f"**{len(btbl)} names** — click a row to focus it. "
+            fbtbl = btbl
+            if fund is not None:
+                fc = st.columns(2)
+                sec_opts = sorted(x for x in btbl["Sector / category"].unique() if x != "—")
+                ctry_opts = sorted(x for x in btbl["Country"].unique() if x != "—")
+                pick_sec = fc[0].multiselect(
+                    "Filter by sector / category", sec_opts,
+                    help="Leave empty to show every sector. Pick a few you "
+                         "*don't* already hold to find names that would "
+                         "broaden a concentrated portfolio.")
+                pick_ctry = fc[1].multiselect(
+                    "Filter by country", ctry_opts,
+                    help="Leave empty to show every country. A good way to "
+                         "spot geographic concentration and look outside it.")
+                if pick_sec:
+                    fbtbl = fbtbl[fbtbl["Sector / category"].isin(pick_sec)]
+                if pick_ctry:
+                    fbtbl = fbtbl[fbtbl["Country"].isin(pick_ctry)]
+                if (pick_sec or pick_ctry) and fbtbl.empty:
+                    st.warning("Nothing in this list matches that combination.")
+
+            st.markdown(f"**{len(fbtbl)} of {len(btbl)} names** — click a row to focus it. "
                         "Sort by clicking a column header.")
             if fund is None:
-                st.caption("Big list: P/E, yield and sector load only when you focus a name.")
-            disp = btbl.copy()
+                st.caption("Tick **Load sector, country, P/E & yield** above to filter "
+                           "by category/country and see P/E, yield and sector here.")
+            disp = fbtbl.copy()
             for c in ("1y return", "vs bench (1y)", "Volatility", "Max drawdown", "From 12mo high"):
                 disp[c] = disp[c].map(lambda v: f"{v:+.0%}" if v == v else "—")
             disp["Yield"] = disp["Yield"].map(lambda v: f"{v*100:.1f}%" if v == v and v > 0 else "—")
@@ -158,7 +189,7 @@ def render_research() -> None:
             )
             picked = ev.selection.rows if ev and ev.selection else []
             if picked:
-                focus = btbl.index[picked[0]]
+                focus = fbtbl.index[picked[0]]
 
     override = st.session_state.pop("_research_focus_override", None)
     focus = (override or jump or searched or focus or (uni[0] if uni else "MSFT")).upper()
